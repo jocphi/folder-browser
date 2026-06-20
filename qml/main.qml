@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.impl
 import QtQuick.Layouts
 import QtCore
 import dk.john.folderbrowser 1.0
@@ -11,11 +12,27 @@ ApplicationWindow {
     visible: true
     title: "folder-browser - CXX-Qt local explorer"
 
-    property var fileRows: parseRows(controller.fileRowsJson)
+    property var allRows: []
     property string sortColumn: "name"
     property bool sortAscending: true
     property bool showHidden: false
-    property var displayedFileRows: sortRows(filterRows(fileRows))
+
+    property int rowHeight: 32
+    property int fileIconSize: rowHeight
+    property string rowFontFamily: "Maple Mono NF"
+
+    property bool foldersFirst: true
+    property bool foldersAlwaysAZ: true
+    property string sizeUnit: "auto"
+
+    property var selectedPaths: []
+    property int lastSelectedIndex: -1
+
+    property color selectedRowColor: "#7f1d1d"
+    property color activeSortHeaderColor: "#374151"
+    property color activeSortColumnColor: "#2b3544"
+    property color activeSortColumnSelectedColor: "#991b1b"
+    property color activeSortBorderColor: "#60a5fa"
 
     function localPathFromUrl(urlValue) {
         let text = String(urlValue)
@@ -42,39 +59,57 @@ ApplicationWindow {
         return fileUriFromPath(pathText) + "\r\n"
     }
 
-    function parseRows(jsonText) {
-        if (!jsonText || jsonText.length === 0) {
-            return []
+    function fileExtension(fileName) {
+        let name = String(fileName || "").toLowerCase()
+        let index = name.lastIndexOf(".")
+        if (index <= 0 || index === name.length - 1) {
+            return ""
         }
+        return name.slice(index + 1)
+    }
 
-        try {
-            return JSON.parse(jsonText)
-        } catch (error) {
-            console.log("Could not parse fileRowsJson:", error)
-            return []
-        }
+    function fileIconName(row) {
+        if (!row) return "text-x-generic"
+        if (row.isDir) return "folder"
+        if (row.kind === "symlink") return "emblem-symbolic-link"
+
+        let ext = fileExtension(row.name)
+        if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "svg", "heic", "avif"].indexOf(ext) >= 0) return "image-x-generic"
+        if (["mp4", "mkv", "webm", "avi", "mov", "m4v", "mpg", "mpeg", "wmv"].indexOf(ext) >= 0) return "video-x-generic"
+        if (["mp3", "flac", "ogg", "opus", "wav", "m4a", "aac", "wma"].indexOf(ext) >= 0) return "audio-x-generic"
+        if (ext === "pdf") return "application-pdf"
+        if (["zip", "7z", "rar", "tar", "gz", "xz", "bz2", "zst"].indexOf(ext) >= 0) return "package-x-generic"
+        if (["rs", "py", "sh", "bash", "fish", "js", "ts", "qml", "cpp", "c", "h", "hpp", "lua"].indexOf(ext) >= 0) return "text-x-script"
+        if (["txt", "md", "json", "toml", "yaml", "yml", "xml", "csv", "log"].indexOf(ext) >= 0) return "text-x-generic"
+        if (["odt", "doc", "docx", "rtf"].indexOf(ext) >= 0) return "x-office-document"
+        if (["ods", "xls", "xlsx"].indexOf(ext) >= 0) return "x-office-spreadsheet"
+        if (["odp", "ppt", "pptx"].indexOf(ext) >= 0) return "x-office-presentation"
+        if (["appimage", "exe", "bin", "run"].indexOf(ext) >= 0) return "application-x-executable"
+        if (ext === "desktop") return "application-x-desktop"
+        return "text-x-generic"
     }
 
     function parentPath(pathText) {
         let text = String(pathText)
-        if (text.length <= 1) {
-            return "/"
-        }
-        if (text.endsWith("/") && text.length > 1) {
-            text = text.slice(0, -1)
-        }
+        if (text.length <= 1) return "/"
+        if (text.endsWith("/") && text.length > 1) text = text.slice(0, -1)
         let index = text.lastIndexOf("/")
-        if (index <= 0) {
-            return "/"
-        }
-        return text.slice(0, index)
+        return index <= 0 ? "/" : text.slice(0, index)
+    }
+
+    function pad2(value) {
+        return String(value).padStart(2, "0")
     }
 
     function modifiedText(seconds) {
-        if (seconds === null || seconds === undefined) {
-            return ""
-        }
-        return new Date(seconds * 1000).toLocaleString()
+        if (seconds === null || seconds === undefined || seconds < 0) return ""
+        let date = new Date(seconds * 1000)
+        return date.getFullYear()
+            + "-" + pad2(date.getMonth() + 1)
+            + "-" + pad2(date.getDate())
+            + " " + pad2(date.getHours())
+            + ":" + pad2(date.getMinutes())
+            + ":" + pad2(date.getSeconds())
     }
 
     function isHiddenRow(row) {
@@ -83,65 +118,10 @@ ApplicationWindow {
 
     function filterRows(rows) {
         let source = Array.from(rows || [])
-        if (root.showHidden) {
-            return source
-        }
+        if (showHidden) return source
         return source.filter(function(row) {
             return !isHiddenRow(row)
         })
-    }
-
-    function refreshDisplayedRows() {
-        root.displayedFileRows = sortRows(filterRows(root.fileRows))
-        if (fileList && root.displayedFileRows.length > 0) {
-            if (fileList.currentIndex < 0 || fileList.currentIndex >= root.displayedFileRows.length) {
-                fileList.currentIndex = 0
-            }
-        }
-    }
-
-    function scanPath(pathText) {
-        pathField.text = String(pathText)
-        controller.scanPath(pathField.text)
-        Qt.callLater(function() {
-            fileList.forceActiveFocus()
-        })
-    }
-
-    function openRow(row) {
-        if (!row) {
-            return
-        }
-        if (row.isDir) {
-            root.scanPath(row.path)
-        } else {
-            controller.statusText = "Selected file: " + row.path
-        }
-    }
-
-    function openCurrentRow() {
-        if (fileList.currentIndex < 0 || fileList.currentIndex >= root.displayedFileRows.length) {
-            return
-        }
-        root.openRow(root.displayedFileRows[fileList.currentIndex])
-    }
-
-    function sortLabel(columnName, title) {
-        if (root.sortColumn !== columnName) {
-            return title
-        }
-        return title + (root.sortAscending ? " ▲" : " ▼")
-    }
-
-    function setSort(columnName) {
-        if (root.sortColumn === columnName) {
-            root.sortAscending = !root.sortAscending
-        } else {
-            root.sortColumn = columnName
-            root.sortAscending = true
-        }
-        refreshDisplayedRows()
-        fileList.forceActiveFocus()
     }
 
     function compareText(left, right) {
@@ -152,30 +132,27 @@ ApplicationWindow {
     }
 
     function compareNullableNumber(left, right) {
-        let leftMissing = left === null || left === undefined
-        let rightMissing = right === null || right === undefined
-
-        if (leftMissing && rightMissing) {
-            return 0
-        }
-        if (leftMissing) {
-            return 1
-        }
-        if (rightMissing) {
-            return -1
-        }
+        let leftMissing = left === null || left === undefined || left < 0
+        let rightMissing = right === null || right === undefined || right < 0
+        if (leftMissing && rightMissing) return 0
+        if (leftMissing) return 1
+        if (rightMissing) return -1
         return Number(left) - Number(right)
     }
 
     function sortRows(rows) {
         let sorted = Array.from(rows || [])
-        let column = root.sortColumn
+        let column = sortColumn
 
         sorted.sort(function(left, right) {
-            let result = 0
+            if (foldersFirst && left.isDir !== right.isDir) {
+                return left.isDir ? -1 : 1
+            }
 
+            let result = 0
             if (column === "name") {
                 result = compareText(left.name, right.name)
+                if (foldersAlwaysAZ && left.isDir && right.isDir) return result
             } else if (column === "kind") {
                 result = compareText(left.kind, right.kind)
             } else if (column === "size") {
@@ -185,35 +162,204 @@ ApplicationWindow {
             }
 
             if (result === 0) {
-                if (left.isDir !== right.isDir) {
-                    result = left.isDir ? -1 : 1
-                } else {
-                    result = compareText(left.name, right.name)
-                }
+                result = left.isDir !== right.isDir
+                    ? (left.isDir ? -1 : 1)
+                    : compareText(left.name, right.name)
             }
-
-            return root.sortAscending ? result : -result
+            return sortAscending ? result : -result
         })
-
         return sorted
+    }
+
+    function sortLabel(columnName, title) {
+        if (sortColumn !== columnName) return title
+        return title + (sortAscending ? " ▲" : " ▼")
+    }
+
+    function setSort(columnName) {
+        if (sortColumn === columnName) {
+            sortAscending = !sortAscending
+        } else {
+            sortColumn = columnName
+            sortAscending = true
+        }
+        refreshDisplayedRows()
+        fileList.forceActiveFocus()
+    }
+
+    function setSizeUnit(unitName) {
+        sizeUnit = unitName
+        refreshDisplayedRows()
+    }
+
+    function europeanNumber(value, decimals) {
+        if (value === null || value === undefined || value < 0 || !isFinite(value)) return ""
+        let fixed = Number(value).toFixed(decimals)
+        let parts = fixed.split(".")
+        let integerPart = parts[0]
+        let decimalPart = parts.length > 1 ? parts[1] : ""
+        let withThousands = ""
+        while (integerPart.length > 3) {
+            withThousands = "." + integerPart.slice(-3) + withThousands
+            integerPart = integerPart.slice(0, -3)
+        }
+        withThousands = integerPart + withThousands
+        return decimals > 0 ? withThousands + "," + decimalPart : withThousands
+    }
+
+    function displaySize(sizeBytes) {
+        if (sizeBytes === null || sizeBytes === undefined || sizeBytes < 0) return ""
+
+        let bytes = Number(sizeBytes)
+        if (sizeUnit === "auto") {
+            let units = ["B", "kB", "MB", "GB", "TB"]
+            let index = 0
+            let value = bytes
+            while (value >= 1000 && index < units.length - 1) {
+                value /= 1000
+                index += 1
+            }
+            return europeanNumber(value, 2) + " " + units[index]
+        }
+
+        let divisor = 1
+        let suffix = "B"
+        if (sizeUnit === "kb") {
+            divisor = 1000
+            suffix = "kB"
+        } else if (sizeUnit === "mb") {
+            divisor = 1000000
+            suffix = "MB"
+        } else if (sizeUnit === "gb") {
+            divisor = 1000000000
+            suffix = "GB"
+        } else if (sizeUnit === "tb") {
+            divisor = 1000000000000
+            suffix = "TB"
+        }
+        return europeanNumber(bytes / divisor, 2) + " " + suffix
+    }
+
+    function rebuildRowsFromController() {
+        let rows = []
+        for (let row = 0; row < controller.rowCount; row += 1) {
+            rows.push({
+                name: controller.fileName(row),
+                kind: controller.fileKind(row),
+                sizeBytes: controller.fileSizeBytes(row),
+                modifiedSecs: controller.fileModifiedSecs(row),
+                path: controller.filePath(row),
+                isDir: controller.fileIsDir(row)
+            })
+        }
+        allRows = rows
+        selectedPaths = []
+        lastSelectedIndex = -1
+        refreshDisplayedRows()
+    }
+
+    function refreshDisplayedRows() {
+        let rows = sortRows(filterRows(allRows))
+        fileModel.clear()
+        for (let index = 0; index < rows.length; index += 1) {
+            fileModel.append(rows[index])
+        }
+        if (fileModel.count > 0) {
+            fileList.currentIndex = Math.max(0, Math.min(fileList.currentIndex, fileModel.count - 1))
+        } else {
+            fileList.currentIndex = -1
+        }
+    }
+
+    function scanPath(pathText) {
+        pathField.text = String(pathText)
+        controller.scanPath(pathField.text)
+        rebuildRowsFromController()
+        Qt.callLater(function() {
+            fileList.forceActiveFocus()
+        })
+    }
+
+    function openRow(row) {
+        if (!row) return
+        if (row.isDir) scanPath(row.path)
+        else controller.statusText = "Selected file: " + row.path
+    }
+
+    function openCurrentRow() {
+        if (fileList.currentIndex >= 0 && fileList.currentIndex < fileModel.count) {
+            openRow(fileModel.get(fileList.currentIndex))
+        }
+    }
+
+    function rowPathAt(index) {
+        if (index < 0 || index >= fileModel.count) return ""
+        return fileModel.get(index).path
+    }
+
+    function isPathSelected(pathText) {
+        return selectedPaths.indexOf(pathText) >= 0
+    }
+
+    function isRowSelected(index) {
+        return isPathSelected(rowPathAt(index))
+    }
+
+    function setSingleSelection(index) {
+        let path = rowPathAt(index)
+        selectedPaths = path.length > 0 ? [path] : []
+        lastSelectedIndex = index
+    }
+
+    function toggleSelection(index) {
+        let path = rowPathAt(index)
+        if (path.length === 0) return
+        let copy = Array.from(selectedPaths)
+        let existing = copy.indexOf(path)
+        if (existing >= 0) copy.splice(existing, 1)
+        else copy.push(path)
+        selectedPaths = copy
+        lastSelectedIndex = index
+    }
+
+    function selectRange(index) {
+        let anchor = lastSelectedIndex >= 0 ? lastSelectedIndex : fileList.currentIndex
+        if (anchor < 0) anchor = index
+        let first = Math.min(anchor, index)
+        let last = Math.max(anchor, index)
+        let paths = []
+        for (let row = first; row <= last; row += 1) {
+            let path = rowPathAt(row)
+            if (path.length > 0) paths.push(path)
+        }
+        selectedPaths = paths
+    }
+
+    function handleRowPress(mouse, index) {
+        fileList.currentIndex = index
+        fileList.forceActiveFocus()
+        if (mouse.modifiers & Qt.ShiftModifier) {
+            selectRange(index)
+        } else if (mouse.modifiers & Qt.ControlModifier) {
+            toggleSelection(index)
+        } else {
+            setSingleSelection(index)
+        }
     }
 
     FolderBrowserController {
         id: controller
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
         statusText: "Ready"
-        fileRowsJson: "[]"
+        rowCount: 0
     }
 
-    onFileRowsChanged: refreshDisplayedRows()
+    ListModel {
+        id: fileModel
+    }
+
     onShowHiddenChanged: refreshDisplayedRows()
-
-    Component.onCompleted: {
-        controller.scanPath(controller.currentPath)
-        Qt.callLater(function() {
-            fileList.forceActiveFocus()
-        })
-    }
+    Component.onCompleted: scanPath(controller.currentPath)
 
     ColumnLayout {
         anchors.fill: parent
@@ -233,7 +379,7 @@ ApplicationWindow {
 
             Button {
                 text: "Up"
-                onClicked: root.scanPath(root.parentPath(controller.currentPath))
+                onClicked: scanPath(parentPath(controller.currentPath))
             }
 
             TextField {
@@ -242,19 +388,19 @@ ApplicationWindow {
                 text: controller.currentPath
                 placeholderText: "Enter a directory path, e.g. /home/joc/Pictures"
                 selectByMouse: true
-                onAccepted: root.scanPath(text)
+                onAccepted: scanPath(text)
             }
 
             Button {
                 text: "Scan"
-                onClicked: root.scanPath(pathField.text)
+                onClicked: scanPath(pathField.text)
             }
 
             CheckBox {
                 id: hiddenToggle
                 text: "Show hidden"
-                checked: root.showHidden
-                onToggled: root.showHidden = checked
+                checked: showHidden
+                onToggled: showHidden = checked
                 ToolTip.visible: hovered
                 ToolTip.text: "Show entries whose names start with a dot"
             }
@@ -284,33 +430,10 @@ ApplicationWindow {
                         anchors.rightMargin: 8
                         spacing: 10
 
-                        ToolButton {
-                            text: root.sortLabel("name", "Name")
-                            onClicked: root.setSort("name")
-                            Layout.fillWidth: true
-                            font.bold: true
-                        }
-
-                        ToolButton {
-                            text: root.sortLabel("kind", "Type")
-                            onClicked: root.setSort("kind")
-                            Layout.preferredWidth: 90
-                            font.bold: true
-                        }
-
-                        ToolButton {
-                            text: root.sortLabel("size", "Size")
-                            onClicked: root.setSort("size")
-                            Layout.preferredWidth: 100
-                            font.bold: true
-                        }
-
-                        ToolButton {
-                            text: root.sortLabel("modified", "Modified")
-                            onClicked: root.setSort("modified")
-                            Layout.preferredWidth: 210
-                            font.bold: true
-                        }
+                        HeaderCell { title: "Name"; columnName: "name"; Layout.fillWidth: true; menu: nameHeaderMenu }
+                        HeaderCell { title: "Type"; columnName: "kind"; Layout.preferredWidth: 90; menu: typeHeaderMenu }
+                        HeaderCell { title: "Size"; columnName: "size"; Layout.preferredWidth: 100; menu: sizeHeaderMenu }
+                        HeaderCell { title: "Modified"; columnName: "modified"; Layout.preferredWidth: 210; menu: modifiedHeaderMenu }
                     }
                 }
 
@@ -320,44 +443,22 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     clip: true
                     spacing: 1
-                    model: root.displayedFileRows
+                    model: fileModel
                     focus: true
                     activeFocusOnTab: true
                     keyNavigationEnabled: true
                     highlightMoveDuration: 80
 
-                    Keys.onReturnPressed: function(event) {
-                        root.openCurrentRow()
-                        event.accepted = true
-                    }
-
-                    Keys.onEnterPressed: function(event) {
-                        root.openCurrentRow()
-                        event.accepted = true
-                    }
-
+                    Keys.onReturnPressed: function(event) { openCurrentRow(); event.accepted = true }
+                    Keys.onEnterPressed: function(event) { openCurrentRow(); event.accepted = true }
                     Keys.onPressed: function(event) {
                         if (event.key === Qt.Key_Backspace) {
-                            root.scanPath(root.parentPath(controller.currentPath))
+                            scanPath(parentPath(controller.currentPath))
                             event.accepted = true
                         }
                     }
-
-                    Keys.onEscapePressed: function(event) {
-                        pathField.forceActiveFocus()
-                        event.accepted = true
-                    }
-
-                    Keys.onSpacePressed: function(event) {
-                        fileList.currentIndex = Math.max(0, fileList.currentIndex)
-                        event.accepted = true
-                    }
-
-                    onCountChanged: {
-                        if (count > 0 && (currentIndex < 0 || currentIndex >= count)) {
-                            currentIndex = 0
-                        }
-                    }
+                    Keys.onEscapePressed: function(event) { pathField.forceActiveFocus(); event.accepted = true }
+                    Keys.onSpacePressed: function(event) { toggleSelection(fileList.currentIndex); event.accepted = true }
 
                     MouseArea {
                         anchors.fill: parent
@@ -365,7 +466,6 @@ ApplicationWindow {
                         hoverEnabled: false
                         propagateComposedEvents: true
                         z: 10
-
                         onWheel: function(wheel) {
                             let maxY = Math.max(0, fileList.contentHeight - fileList.height)
                             let step = wheel.angleDelta.y * 3.0
@@ -374,99 +474,12 @@ ApplicationWindow {
                         }
                     }
 
-                    delegate: Rectangle {
-                        id: rowDelegate
-
-                        required property var modelData
-                        required property int index
-
-                        width: fileList.width
-                        height: 32
-                        radius: 4
-                        color: fileList.currentIndex === index ? "#334155" : (index % 2 === 0 ? "#1f2937" : "#20242b")
-
-                        Item {
-                            id: dragProxy
-                            width: 1
-                            height: 1
-                            visible: false
-
-                            Drag.active: rowMouseArea.drag.active
-                            Drag.dragType: Drag.Automatic
-                            Drag.supportedActions: Qt.CopyAction
-                            Drag.mimeData: {
-                                "text/uri-list": root.uriListFromPath(modelData.path),
-                                "text/plain": modelData.path
-                            }
-                        }
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 8
-                            anchors.rightMargin: 8
-                            spacing: 10
-
-                            Label {
-                                text: (modelData.isDir ? "[DIR] " : "") + modelData.name
-                                color: modelData.isDir ? "#bfdbfe" : "#e5e7eb"
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-
-                            Label {
-                                text: modelData.kind
-                                color: "#d1d5db"
-                                elide: Text.ElideRight
-                                Layout.preferredWidth: 90
-                            }
-
-                            Label {
-                                text: modelData.sizeText
-                                color: "#d1d5db"
-                                horizontalAlignment: Text.AlignRight
-                                Layout.preferredWidth: 100
-                            }
-
-                            Label {
-                                text: root.modifiedText(modelData.modifiedSecs)
-                                color: "#d1d5db"
-                                elide: Text.ElideRight
-                                Layout.preferredWidth: 210
-                            }
-                        }
-
-                        MouseArea {
-                            id: rowMouseArea
-                            anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton
-                            drag.target: dragProxy
-                            drag.axis: Drag.XAndYAxis
-                            drag.threshold: 8
-
-                            onPressed: {
-                                fileList.currentIndex = index
-                                fileList.forceActiveFocus()
-                            }
-                            onClicked: {
-                                fileList.currentIndex = index
-                                fileList.forceActiveFocus()
-                            }
-                            onDoubleClicked: root.openRow(modelData)
-                            onReleased: {
-                                dragProxy.x = 0
-                                dragProxy.y = 0
-                            }
-                            onCanceled: {
-                                dragProxy.x = 0
-                                dragProxy.y = 0
-                            }
-                        }
-                    }
+                    delegate: RowDelegate {}
                 }
 
                 Label {
                     visible: fileList.count === 0
-                    text: root.fileRows.length > 0 && !root.showHidden
+                    text: allRows.length > 0 && !showHidden
                           ? "Only hidden entries are available. Enable Show hidden to display them."
                           : "No entries to display. Choose an existing directory and press Scan."
                     color: "#d8dee9"
@@ -478,16 +491,175 @@ ApplicationWindow {
 
         RowLayout {
             Layout.fillWidth: true
-
             Label {
                 Layout.fillWidth: true
-                text: controller.statusText + " — keyboard: ↑/↓ select, Enter open folder, Backspace up, Esc path field; drag rows to apps"
+                text: controller.statusText + " — " + selectedPaths.length + " selected"
                 elide: Text.ElideRight
             }
+            Label { text: fileList.count + " / " + allRows.length + " items" }
+        }
+    }
 
-            Label {
-                text: fileList.count + " / " + root.fileRows.length + " items"
+    Menu {
+        id: nameHeaderMenu
+        MenuItem {
+            text: "Folders first"
+            checkable: true
+            checked: foldersFirst
+            onTriggered: { foldersFirst = checked; refreshDisplayedRows() }
+        }
+        MenuItem {
+            text: "Folders always sorted A-B"
+            checkable: true
+            checked: foldersAlwaysAZ
+            onTriggered: { foldersAlwaysAZ = checked; refreshDisplayedRows() }
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Dummy: Natural sort"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: Case-sensitive sort"
+            enabled: false
+        }
+    }
+
+    Menu {
+        id: typeHeaderMenu
+        MenuItem {
+            text: "Dummy: Group by type"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: Hide unknown types"
+            enabled: false
+        }
+    }
+    Menu {
+        id: modifiedHeaderMenu
+        MenuItem {
+            text: "Dummy: Today only"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: This week"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: ISO UTC time"
+            enabled: false
+        }
+    }
+
+    Menu {
+        id: sizeHeaderMenu
+        MenuItem { text: "Auto"; checkable: true; checked: sizeUnit === "auto"; onTriggered: setSizeUnit("auto") }
+        MenuSeparator {}
+        MenuItem { text: "B"; checkable: true; checked: sizeUnit === "bytes"; onTriggered: setSizeUnit("bytes") }
+        MenuItem { text: "kB"; checkable: true; checked: sizeUnit === "kb"; onTriggered: setSizeUnit("kb") }
+        MenuItem { text: "MB"; checkable: true; checked: sizeUnit === "mb"; onTriggered: setSizeUnit("mb") }
+        MenuItem { text: "GB"; checkable: true; checked: sizeUnit === "gb"; onTriggered: setSizeUnit("gb") }
+        MenuItem { text: "TB"; checkable: true; checked: sizeUnit === "tb"; onTriggered: setSizeUnit("tb") }
+        MenuSeparator {}
+        MenuItem {
+            text: "Dummy: Hide empty sizes"
+            enabled: false
+        }
+    }
+
+    component HeaderCell: Rectangle {
+        property string title
+        property string columnName
+        property var menu
+        Layout.fillHeight: true
+        radius: 4
+        color: sortColumn === columnName ? activeSortHeaderColor : "transparent"
+        border.color: sortColumn === columnName ? activeSortBorderColor : "transparent"
+        Label { anchors.centerIn: parent; text: sortLabel(columnName, title); color: "#f9fafb"; font.bold: true; font.family: rowFontFamily }
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: function(mouse) {
+                if (mouse.button === Qt.RightButton) menu.popup()
+                else setSort(columnName)
             }
         }
+    }
+
+    component RowDelegate: Rectangle {
+        id: rowDelegate
+        required property int index
+        required property string name
+        required property string kind
+        required property double sizeBytes
+        required property double modifiedSecs
+        required property string path
+        required property bool isDir
+        width: fileList.width
+        height: rowHeight
+        radius: 4
+        color: isRowSelected(index)
+               ? selectedRowColor
+               : (fileList.currentIndex === index ? "#334155" : (index % 2 === 0 ? "#1f2937" : "#20242b"))
+
+        Item {
+            id: dragProxy
+            width: 1
+            height: 1
+            visible: false
+            Drag.active: rowMouseArea.drag.active
+            Drag.dragType: Drag.Automatic
+            Drag.supportedActions: Qt.CopyAction
+            Drag.mimeData: {
+                "text/uri-list": uriListFromPath(rowDelegate.path),
+                "text/plain": rowDelegate.path
+            }
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            spacing: 10
+            Cell {
+                columnName: "name"
+                selected: isRowSelected(rowDelegate.index)
+                Layout.fillWidth: true
+                RowLayout {
+                    anchors.fill: parent
+                    spacing: 6
+                    IconImage { Layout.preferredWidth: fileIconSize; Layout.preferredHeight: fileIconSize; Layout.alignment: Qt.AlignVCenter; name: fileIconName(rowDelegate); sourceSize.width: fileIconSize; sourceSize.height: fileIconSize; color: "transparent" }
+                    Label { Layout.fillWidth: true; Layout.fillHeight: true; verticalAlignment: Text.AlignVCenter; text: rowDelegate.name; color: rowDelegate.isDir ? "#bfdbfe" : "#e5e7eb"; elide: Text.ElideRight; font.family: rowFontFamily }
+                }
+            }
+            Cell { columnName: "kind"; selected: isRowSelected(rowDelegate.index); Layout.preferredWidth: 90; Label { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: rowDelegate.kind; color: "#d1d5db"; elide: Text.ElideRight; font.family: rowFontFamily } }
+            Cell { columnName: "size"; selected: isRowSelected(rowDelegate.index); Layout.preferredWidth: 100; Label { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignRight; text: displaySize(rowDelegate.sizeBytes); color: "#d1d5db"; font.family: rowFontFamily } }
+            Cell { columnName: "modified"; selected: isRowSelected(rowDelegate.index); Layout.preferredWidth: 210; Label { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: modifiedText(rowDelegate.modifiedSecs); color: "#d1d5db"; elide: Text.ElideRight; font.family: rowFontFamily } }
+        }
+
+        MouseArea {
+            id: rowMouseArea
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            drag.target: dragProxy
+            drag.axis: Drag.XAndYAxis
+            drag.threshold: 8
+            onPressed: function(mouse) { handleRowPress(mouse, index) }
+            onClicked: function(mouse) { }
+            onDoubleClicked: openRow(fileModel.get(index))
+            onReleased: { dragProxy.x = 0; dragProxy.y = 0 }
+            onCanceled: { dragProxy.x = 0; dragProxy.y = 0 }
+        }
+    }
+
+    component Cell: Rectangle {
+        property string columnName
+        property bool selected: false
+        Layout.fillHeight: true
+        radius: 3
+        color: sortColumn === columnName
+               ? (selected ? activeSortColumnSelectedColor : activeSortColumnColor)
+               : "transparent"
     }
 }

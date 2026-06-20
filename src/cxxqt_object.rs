@@ -1,6 +1,7 @@
 /// CXX-Qt QObject bridge for the folder-browser scaffold.
 ///
-/// This version exposes a small structured local-directory scanner to QML.
+/// This version removes JSON transfer. Rust stores structured file rows and QML
+/// reads them through invokable row accessors into a real Qt/QML ListModel.
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -14,7 +15,7 @@ pub mod qobject {
         #[qproperty(i32, click_count, cxx_name = "clickCount")]
         #[qproperty(QString, current_path, cxx_name = "currentPath")]
         #[qproperty(QString, status_text, cxx_name = "statusText")]
-        #[qproperty(QString, file_rows_json, cxx_name = "fileRowsJson")]
+        #[qproperty(i32, row_count, cxx_name = "rowCount")]
         #[namespace = "folder_browser"]
         type FolderBrowserController = super::FolderBrowserControllerRust;
 
@@ -29,10 +30,39 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "scanPath"]
         fn scan_path(self: Pin<&mut Self>, path: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "fileName"]
+        fn file_name(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileKind"]
+        fn file_kind(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileSizeBytes"]
+        fn file_size_bytes(&self, row: i32) -> i64;
+
+        #[qinvokable]
+        #[cxx_name = "fileSizeText"]
+        fn file_size_text(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileModifiedSecs"]
+        fn file_modified_secs(&self, row: i32) -> i64;
+
+        #[qinvokable]
+        #[cxx_name = "filePath"]
+        fn file_path(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileIsDir"]
+        fn file_is_dir(&self, row: i32) -> bool;
     }
 }
 
 use core::pin::Pin;
+use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,14 +73,16 @@ pub struct FolderBrowserControllerRust {
     click_count: i32,
     current_path: QString,
     status_text: QString,
-    file_rows_json: QString,
+    row_count: i32,
+    rows: Vec<FileRow>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 struct FileRow {
     name: String,
     kind: String,
     size_bytes: Option<u64>,
+    size_text: String,
     modified_secs: Option<u64>,
     path: PathBuf,
     is_dir: bool,
@@ -82,7 +114,8 @@ impl qobject::FolderBrowserController {
         self.as_mut().set_current_path(QString::from(local_path.clone()));
 
         if !directory.exists() {
-            self.as_mut().set_file_rows_json(QString::from("[]"));
+            self.as_mut().rust_mut().rows.clear();
+            self.as_mut().set_row_count(0);
             self.as_mut().set_status_text(QString::from(format!(
                 "Path does not exist: {local_path}"
             )));
@@ -90,7 +123,8 @@ impl qobject::FolderBrowserController {
         }
 
         if !directory.is_dir() {
-            self.as_mut().set_file_rows_json(QString::from("[]"));
+            self.as_mut().rust_mut().rows.clear();
+            self.as_mut().set_row_count(0);
             self.as_mut().set_status_text(QString::from(format!(
                 "Not a directory: {local_path}"
             )));
@@ -100,7 +134,8 @@ impl qobject::FolderBrowserController {
         let rows = match scan_directory(directory) {
             Ok(rows) => rows,
             Err(error) => {
-                self.as_mut().set_file_rows_json(QString::from("[]"));
+                self.as_mut().rust_mut().rows.clear();
+                self.as_mut().set_row_count(0);
                 self.as_mut().set_status_text(QString::from(format!(
                     "Could not read directory {local_path}: {error}"
                 )));
@@ -109,11 +144,60 @@ impl qobject::FolderBrowserController {
         };
 
         let count = rows.len();
-        let json = rows_to_json(&rows);
-        self.as_mut().set_file_rows_json(QString::from(json));
+        self.as_mut().rust_mut().rows = rows;
+        self.as_mut().set_row_count(count.min(i32::MAX as usize) as i32);
         self.as_mut().set_status_text(QString::from(format!(
             "Scanned {count} entries in {local_path}"
         )));
+    }
+
+    pub fn file_name(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.name.clone()))
+            .unwrap_or_default()
+    }
+
+    pub fn file_kind(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.kind.clone()))
+            .unwrap_or_default()
+    }
+
+    pub fn file_size_bytes(&self, row: i32) -> i64 {
+        self.row(row)
+            .and_then(|row| row.size_bytes)
+            .and_then(|value| i64::try_from(value).ok())
+            .unwrap_or(-1)
+    }
+
+    pub fn file_size_text(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.size_text.clone()))
+            .unwrap_or_default()
+    }
+
+    pub fn file_modified_secs(&self, row: i32) -> i64 {
+        self.row(row)
+            .and_then(|row| row.modified_secs)
+            .and_then(|value| i64::try_from(value).ok())
+            .unwrap_or(-1)
+    }
+
+    pub fn file_path(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.path.to_string_lossy().to_string()))
+            .unwrap_or_default()
+    }
+
+    pub fn file_is_dir(&self, row: i32) -> bool {
+        self.row(row).map(|row| row.is_dir).unwrap_or(false)
+    }
+
+    fn row(&self, row: i32) -> Option<&FileRow> {
+        if row < 0 {
+            return None;
+        }
+        self.rust().rows.get(row as usize)
     }
 }
 
@@ -128,6 +212,7 @@ fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
                     name: format!("<unreadable entry: {error}>"),
                     kind: "error".to_string(),
                     size_bytes: None,
+                    size_text: String::new(),
                     modified_secs: None,
                     path: directory.to_path_buf(),
                     is_dir: false,
@@ -172,6 +257,7 @@ fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
             name,
             kind,
             size_bytes,
+            size_text: format_size(size_bytes),
             modified_secs,
             path,
             is_dir,
@@ -188,42 +274,9 @@ fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
     Ok(rows)
 }
 
-fn rows_to_json(rows: &[FileRow]) -> String {
-    let mut output = String::from("[");
-
-    for (index, row) in rows.iter().enumerate() {
-        if index > 0 {
-            output.push(',');
-        }
-
-        let size_json = row
-            .size_bytes
-            .map(|size| size.to_string())
-            .unwrap_or_else(|| "null".to_string());
-        let modified_json = row
-            .modified_secs
-            .map(|modified| modified.to_string())
-            .unwrap_or_else(|| "null".to_string());
-
-        output.push_str(&format!(
-            "{{\"name\":\"{}\",\"kind\":\"{}\",\"sizeBytes\":{},\"sizeText\":\"{}\",\"modifiedSecs\":{},\"path\":\"{}\",\"isDir\":{}}}",
-            json_escape(&row.name),
-            json_escape(&row.kind),
-            size_json,
-            json_escape(&format_size(row.size_bytes)),
-            modified_json,
-            json_escape(&row.path.to_string_lossy()),
-            if row.is_dir { "true" } else { "false" }
-        ));
-    }
-
-    output.push(']');
-    output
-}
-
 fn format_size(size_bytes: Option<u64>) -> String {
     let Some(bytes) = size_bytes else {
-        return "".to_string();
+        return String::new();
     };
 
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -240,26 +293,6 @@ fn format_size(size_bytes: Option<u64>) -> String {
     } else {
         format!("{value:.1} {}", UNITS[unit_index])
     }
-}
-
-fn json_escape(input: &str) -> String {
-    let mut escaped = String::with_capacity(input.len());
-
-    for character in input.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control() => {
-                escaped.push_str(&format!("\\u{:04x}", character as u32));
-            }
-            character => escaped.push(character),
-        }
-    }
-
-    escaped
 }
 
 fn normalize_local_path(input: &str) -> String {
