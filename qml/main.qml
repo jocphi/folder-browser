@@ -16,6 +16,7 @@ ApplicationWindow {
     property string sortColumn: "name"
     property bool sortAscending: true
     property bool showHidden: false
+    property string filterText: ""
 
     property int rowHeight: 32
     property int fileIconSize: rowHeight
@@ -57,6 +58,33 @@ ApplicationWindow {
 
     function uriListFromPath(pathText) {
         return fileUriFromPath(pathText) + "\r\n"
+    }
+
+    function htmlEscape(textValue) {
+        return String(textValue || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+    }
+
+    function highlightedFileName(fileName) {
+        let escaped = htmlEscape(fileName)
+        let datePattern = /(\b\d{4}[-_.]\d{2}[-_.]\d{2}\b|\b\d{8}\b|\b\d{2}[-_.]\d{2}[-_.]\d{4}\b)/g
+        return escaped.replace(datePattern, "<span style='color:#f97316'>$1</span>")
+    }
+
+    function matchesFilter(row) {
+        let query = String(filterText || "").trim().toLowerCase()
+        if (query.length === 0) {
+            return true
+        }
+        if (!row) {
+            return false
+        }
+        return String(row.name || "").toLowerCase().indexOf(query) >= 0
+            || String(row.kind || "").toLowerCase().indexOf(query) >= 0
+            || String(row.path || "").toLowerCase().indexOf(query) >= 0
     }
 
     function fileExtension(fileName) {
@@ -118,9 +146,13 @@ ApplicationWindow {
 
     function filterRows(rows) {
         let source = Array.from(rows || [])
-        if (showHidden) return source
+        if (!showHidden) {
+            source = source.filter(function(row) {
+                return !isHiddenRow(row)
+            })
+        }
         return source.filter(function(row) {
-            return !isHiddenRow(row)
+            return matchesFilter(row)
         })
     }
 
@@ -207,7 +239,8 @@ ApplicationWindow {
         return decimals > 0 ? withThousands + "," + decimalPart : withThousands
     }
 
-    function displaySize(sizeBytes) {
+    function displaySize(sizeBytes, row) {
+        if (row && row.isDir && row.sizeStatus === "unknown") return "unknown"
         if (sizeBytes === null || sizeBytes === undefined || sizeBytes < 0) return ""
 
         let bytes = Number(sizeBytes)
@@ -240,6 +273,15 @@ ApplicationWindow {
         return europeanNumber(bytes / divisor, 2) + " " + suffix
     }
 
+    function sizeColor(row) {
+        if (!row || !row.isDir) return "#d1d5db"
+        if (row.sizeStatus === "unknown") return "#7f1d1d"
+        if (row.sizeStatus === "scanning") return "#9ca3af"
+        if (row.sizeStatus === "done") return "#22c55e"
+        if (row.sizeStatus === "error") return "#ef4444"
+        return "#d1d5db"
+    }
+
     function rebuildRowsFromController() {
         let rows = []
         for (let row = 0; row < controller.rowCount; row += 1) {
@@ -247,14 +289,13 @@ ApplicationWindow {
                 name: controller.fileName(row),
                 kind: controller.fileKind(row),
                 sizeBytes: controller.fileSizeBytes(row),
+                sizeStatus: controller.fileSizeStatus(row),
                 modifiedSecs: controller.fileModifiedSecs(row),
                 path: controller.filePath(row),
                 isDir: controller.fileIsDir(row)
             })
         }
         allRows = rows
-        selectedPaths = []
-        lastSelectedIndex = -1
         refreshDisplayedRows()
     }
 
@@ -274,6 +315,8 @@ ApplicationWindow {
     function scanPath(pathText) {
         pathField.text = String(pathText)
         controller.scanPath(pathField.text)
+        selectedPaths = []
+        lastSelectedIndex = -1
         rebuildRowsFromController()
         Qt.callLater(function() {
             fileList.forceActiveFocus()
@@ -352,10 +395,19 @@ ApplicationWindow {
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
         statusText: "Ready"
         rowCount: 0
+        updateGeneration: 0
+        onUpdateGenerationChanged: rebuildRowsFromController()
     }
 
     ListModel {
         id: fileModel
+    }
+
+    Timer {
+        id: rowsRebuildTimer
+        interval: 250
+        repeat: false
+        onTriggered: rebuildRowsFromController()
     }
 
     onShowHiddenChanged: refreshDisplayedRows()
@@ -394,6 +446,20 @@ ApplicationWindow {
             Button {
                 text: "Scan"
                 onClicked: scanPath(pathField.text)
+            }
+
+            TextField {
+                id: filterField
+                Layout.preferredWidth: 220
+                text: filterText
+                placeholderText: "Filter/search"
+                selectByMouse: true
+                onTextChanged: {
+                    filterText = text
+                    refreshDisplayedRows()
+                }
+                ToolTip.visible: hovered
+                ToolTip.text: "Filter by filename, type, or path"
             }
 
             CheckBox {
@@ -512,7 +578,7 @@ ApplicationWindow {
                 text: controller.statusText + " — " + selectedPaths.length + " selected"
                 elide: Text.ElideRight
             }
-            Label { text: fileList.count + " / " + allRows.length + " items" }
+            Label { text: filterText.length > 0 ? fileList.count + " / " + allRows.length + " matches" : fileList.count + " / " + allRows.length + " items" }
         }
     }
 
@@ -633,6 +699,7 @@ ApplicationWindow {
         required property string name
         required property string kind
         required property double sizeBytes
+        required property string sizeStatus
         required property double modifiedSecs
         required property string path
         required property bool isDir
@@ -679,7 +746,8 @@ ApplicationWindow {
                     Label { Layout.fillWidth: true
                     Layout.fillHeight: true
                     verticalAlignment: Text.AlignVCenter
-                    text: rowDelegate.name
+                    text: highlightedFileName(rowDelegate.name)
+                    textFormat: Text.RichText
                     color: rowDelegate.isDir ? "#bfdbfe" : "#e5e7eb"
                     elide: Text.ElideRight
                     font.family: rowFontFamily }
@@ -700,8 +768,8 @@ ApplicationWindow {
             Label { anchors.fill: parent
             verticalAlignment: Text.AlignVCenter
             horizontalAlignment: Text.AlignRight
-            text: displaySize(rowDelegate.sizeBytes)
-            color: "#d1d5db"
+            text: displaySize(rowDelegate.sizeBytes, rowDelegate)
+            color: sizeColor(rowDelegate)
             font.family: rowFontFamily } }
             Cell { columnName: "modified"
             selected: isRowSelected(rowDelegate.index)

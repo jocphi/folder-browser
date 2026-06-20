@@ -1,7 +1,7 @@
 /// CXX-Qt QObject bridge for the folder-browser scaffold.
 ///
-/// This version removes JSON transfer. Rust stores structured file rows and QML
-/// reads them through invokable row accessors into a real Qt/QML ListModel.
+/// Rust stores structured file rows, exposes them through invokable accessors,
+/// and calculates directory sizes on a throttled background thread.
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -16,6 +16,7 @@ pub mod qobject {
         #[qproperty(QString, current_path, cxx_name = "currentPath")]
         #[qproperty(QString, status_text, cxx_name = "statusText")]
         #[qproperty(i32, row_count, cxx_name = "rowCount")]
+        #[qproperty(i32, update_generation, cxx_name = "updateGeneration")]
         #[namespace = "folder_browser"]
         type FolderBrowserController = super::FolderBrowserControllerRust;
 
@@ -48,6 +49,10 @@ pub mod qobject {
         fn file_size_text(&self, row: i32) -> QString;
 
         #[qinvokable]
+        #[cxx_name = "fileSizeStatus"]
+        fn file_size_status(&self, row: i32) -> QString;
+
+        #[qinvokable]
         #[cxx_name = "fileModifiedSecs"]
         fn file_modified_secs(&self, row: i32) -> i64;
 
@@ -59,14 +64,16 @@ pub mod qobject {
         #[cxx_name = "fileIsDir"]
         fn file_is_dir(&self, row: i32) -> bool;
     }
+
+    impl cxx_qt::Threading for FolderBrowserController {}
 }
 
 use core::pin::Pin;
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 #[derive(Default)]
 pub struct FolderBrowserControllerRust {
@@ -74,7 +81,31 @@ pub struct FolderBrowserControllerRust {
     current_path: QString,
     status_text: QString,
     row_count: i32,
+    update_generation: i32,
     rows: Vec<FileRow>,
+    scan_generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SizeStatus {
+    #[default]
+    File,
+    Unknown,
+    Scanning,
+    Done,
+    Error,
+}
+
+impl SizeStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            SizeStatus::File => "file",
+            SizeStatus::Unknown => "unknown",
+            SizeStatus::Scanning => "scanning",
+            SizeStatus::Done => "done",
+            SizeStatus::Error => "error",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -83,9 +114,95 @@ struct FileRow {
     kind: String,
     size_bytes: Option<u64>,
     size_text: String,
+    size_status: SizeStatus,
     modified_secs: Option<u64>,
     path: PathBuf,
     is_dir: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DirectorySizeStatusUpdate {
+    Scanning,
+    Done,
+    Error,
+}
+
+impl DirectorySizeStatusUpdate {
+    fn to_size_status(self) -> SizeStatus {
+        match self {
+            DirectorySizeStatusUpdate::Scanning => SizeStatus::Scanning,
+            DirectorySizeStatusUpdate::Done => SizeStatus::Done,
+            DirectorySizeStatusUpdate::Error => SizeStatus::Error,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PendingDirectorySizeUpdate {
+    row_index: usize,
+    size_bytes: Option<u64>,
+    status: DirectorySizeStatusUpdate,
+}
+
+struct DirectorySizeBatch {
+    qt_thread: cxx_qt::CxxQtThread<qobject::FolderBrowserController>,
+    generation: u64,
+    pending: Vec<PendingDirectorySizeUpdate>,
+    last_flush: Instant,
+}
+
+impl DirectorySizeBatch {
+    fn new(
+        qt_thread: cxx_qt::CxxQtThread<qobject::FolderBrowserController>,
+        generation: u64,
+    ) -> Self {
+        Self {
+            qt_thread,
+            generation,
+            pending: Vec::new(),
+            last_flush: Instant::now(),
+        }
+    }
+
+    fn push(&mut self, row_index: usize, size_bytes: Option<u64>, status: DirectorySizeStatusUpdate) {
+        self.pending.push(PendingDirectorySizeUpdate {
+            row_index,
+            size_bytes,
+            status,
+        });
+    }
+
+    fn flush_if_needed(&mut self, max_pending: usize, max_elapsed: Duration) {
+        if self.pending.len() >= max_pending || self.last_flush.elapsed() >= max_elapsed {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+
+        let generation = self.generation;
+        let updates = std::mem::take(&mut self.pending);
+        self.last_flush = Instant::now();
+
+        let _ = self.qt_thread.queue(move |mut controller| {
+            if controller.rust().scan_generation != generation {
+                return;
+            }
+
+            let rows = &mut controller.as_mut().rust_mut().rows;
+            for update in updates {
+                if let Some(row) = rows.get_mut(update.row_index) {
+                    row.size_bytes = update.size_bytes;
+                    row.size_text = format_size(update.size_bytes);
+                    row.size_status = update.status.to_size_status();
+                }
+            }
+            controller.as_mut().bump_update_generation();
+        });
+    }
 }
 
 impl qobject::FolderBrowserController {
@@ -107,27 +224,29 @@ impl qobject::FolderBrowserController {
     }
 
     pub fn scan_path(mut self: Pin<&mut Self>, path: &QString) {
+        let qt_thread = self.qt_thread();
         let raw_path = path.to_string();
         let local_path = normalize_local_path(&raw_path);
         let directory = Path::new(&local_path);
 
         self.as_mut().set_current_path(QString::from(local_path.clone()));
+        let next_generation = self.rust().scan_generation.wrapping_add(1);
+        self.as_mut().rust_mut().scan_generation = next_generation;
+        let generation = next_generation;
 
         if !directory.exists() {
             self.as_mut().rust_mut().rows.clear();
             self.as_mut().set_row_count(0);
-            self.as_mut().set_status_text(QString::from(format!(
-                "Path does not exist: {local_path}"
-            )));
+            self.as_mut().bump_update_generation();
+            self.as_mut().set_status_text(QString::from(format!("Path does not exist: {local_path}")));
             return;
         }
 
         if !directory.is_dir() {
             self.as_mut().rust_mut().rows.clear();
             self.as_mut().set_row_count(0);
-            self.as_mut().set_status_text(QString::from(format!(
-                "Not a directory: {local_path}"
-            )));
+            self.as_mut().bump_update_generation();
+            self.as_mut().set_status_text(QString::from(format!("Not a directory: {local_path}")));
             return;
         }
 
@@ -136,6 +255,7 @@ impl qobject::FolderBrowserController {
             Err(error) => {
                 self.as_mut().rust_mut().rows.clear();
                 self.as_mut().set_row_count(0);
+                self.as_mut().bump_update_generation();
                 self.as_mut().set_status_text(QString::from(format!(
                     "Could not read directory {local_path}: {error}"
                 )));
@@ -143,24 +263,70 @@ impl qobject::FolderBrowserController {
             }
         };
 
+        let directory_jobs: Vec<(usize, PathBuf)> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.is_dir)
+            .map(|(index, row)| (index, row.path.clone()))
+            .collect();
+
         let count = rows.len();
         self.as_mut().rust_mut().rows = rows;
         self.as_mut().set_row_count(count.min(i32::MAX as usize) as i32);
+        self.as_mut().bump_update_generation();
         self.as_mut().set_status_text(QString::from(format!(
-            "Scanned {count} entries in {local_path}"
+            "Scanned {count} entries in {local_path}; calculating directory sizes"
         )));
+
+        if !directory_jobs.is_empty() {
+            std::thread::spawn(move || {
+                let status_qt_thread = qt_thread.clone();
+                let mut batch = DirectorySizeBatch::new(qt_thread, generation);
+
+                for (row_index, dir_path) in directory_jobs {
+                    let mut last_progress_update = Instant::now();
+
+                    let result = calculate_directory_size(&dir_path, |partial_size| {
+                        if last_progress_update.elapsed() >= Duration::from_secs(2) {
+                            batch.push(
+                                row_index,
+                                Some(partial_size),
+                                DirectorySizeStatusUpdate::Scanning,
+                            );
+                            batch.flush_if_needed(16, Duration::from_millis(750));
+                            last_progress_update = Instant::now();
+                        }
+                    });
+
+                    match result {
+                        Ok(final_size) => batch.push(
+                            row_index,
+                            Some(final_size),
+                            DirectorySizeStatusUpdate::Done,
+                        ),
+                        Err(_) => batch.push(row_index, None, DirectorySizeStatusUpdate::Error),
+                    }
+
+                    batch.flush_if_needed(32, Duration::from_millis(750));
+                }
+
+                batch.flush();
+
+                let _ = status_qt_thread.queue(move |mut controller| {
+                    if controller.rust().scan_generation == generation {
+                        controller.as_mut().set_status_text(QString::from("Directory size calculation finished"));
+                    }
+                });
+            });
+        }
     }
 
     pub fn file_name(&self, row: i32) -> QString {
-        self.row(row)
-            .map(|row| QString::from(row.name.clone()))
-            .unwrap_or_default()
+        self.row(row).map(|row| QString::from(row.name.clone())).unwrap_or_default()
     }
 
     pub fn file_kind(&self, row: i32) -> QString {
-        self.row(row)
-            .map(|row| QString::from(row.kind.clone()))
-            .unwrap_or_default()
+        self.row(row).map(|row| QString::from(row.kind.clone())).unwrap_or_default()
     }
 
     pub fn file_size_bytes(&self, row: i32) -> i64 {
@@ -171,9 +337,13 @@ impl qobject::FolderBrowserController {
     }
 
     pub fn file_size_text(&self, row: i32) -> QString {
+        self.row(row).map(|row| QString::from(row.size_text.clone())).unwrap_or_default()
+    }
+
+    pub fn file_size_status(&self, row: i32) -> QString {
         self.row(row)
-            .map(|row| QString::from(row.size_text.clone()))
-            .unwrap_or_default()
+            .map(|row| QString::from(row.size_status.as_str()))
+            .unwrap_or_else(|| QString::from("unknown"))
     }
 
     pub fn file_modified_secs(&self, row: i32) -> i64 {
@@ -199,6 +369,12 @@ impl qobject::FolderBrowserController {
         }
         self.rust().rows.get(row as usize)
     }
+
+    fn bump_update_generation(mut self: Pin<&mut Self>) {
+        let current = *self.update_generation();
+        let next = current.wrapping_add(1);
+        self.as_mut().set_update_generation(next);
+    }
 }
 
 fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
@@ -213,6 +389,7 @@ fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
                     kind: "error".to_string(),
                     size_bytes: None,
                     size_text: String::new(),
+                    size_status: SizeStatus::Error,
                     modified_secs: None,
                     path: directory.to_path_buf(),
                     is_dir: false,
@@ -241,11 +418,8 @@ fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
         }
         .to_string();
 
-        let size_bytes = if is_file {
-            metadata.as_ref().map(|metadata| metadata.len())
-        } else {
-            None
-        };
+        let size_bytes = if is_file { metadata.as_ref().map(|metadata| metadata.len()) } else { None };
+        let size_status = if is_dir { SizeStatus::Unknown } else { SizeStatus::File };
 
         let modified_secs = metadata
             .as_ref()
@@ -258,6 +432,7 @@ fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
             kind,
             size_bytes,
             size_text: format_size(size_bytes),
+            size_status,
             modified_secs,
             path,
             is_dir,
@@ -274,24 +449,62 @@ fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
     Ok(rows)
 }
 
+fn calculate_directory_size<F>(directory: &Path, mut progress: F) -> Result<u64, std::io::Error>
+where
+    F: FnMut(u64),
+{
+    let mut total: u64 = 0;
+    let mut stack: Vec<PathBuf> = vec![directory.to_path_buf()];
+
+    while let Some(current_directory) = stack.pop() {
+        let read_dir = match fs::read_dir(&current_directory) {
+            Ok(read_dir) => read_dir,
+            Err(_) => continue,
+        };
+
+        for entry_result in read_dir {
+            let entry = match entry_result {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if file_type.is_file() {
+                if let Ok(metadata) = entry.metadata() {
+                    total = total.saturating_add(metadata.len());
+                    progress(total);
+                }
+            }
+        }
+    }
+
+    Ok(total)
+}
+
 fn format_size(size_bytes: Option<u64>) -> String {
     let Some(bytes) = size_bytes else {
         return String::new();
     };
 
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
     let mut value = bytes as f64;
     let mut unit_index = 0usize;
 
-    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
-        value /= 1024.0;
+    while value >= 1000.0 && unit_index < UNITS.len() - 1 {
+        value /= 1000.0;
         unit_index += 1;
     }
 
     if unit_index == 0 {
         format!("{bytes} B")
     } else {
-        format!("{value:.1} {}", UNITS[unit_index])
+        format!("{value:.2} {}", UNITS[unit_index])
     }
 }
 
