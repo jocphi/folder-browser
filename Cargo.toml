@@ -1,0 +1,14 @@
+[package]
+name = "folder-browser-cxxqt-minimal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+cxx = "1"
+cxx-qt = "0.8.1"
+cxx-qt-lib = { version = "0.8.1", features = ["full"] }
+
+[build-dependencies]
+# Required for statically linking Qt object files with Qt 6.
+cxx-qt-build = { version = "0.8.1", features = ["link_qt_object_files"] }
