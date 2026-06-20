@@ -430,10 +430,22 @@ ApplicationWindow {
                         anchors.rightMargin: 8
                         spacing: 10
 
-                        HeaderCell { title: "Name"; columnName: "name"; Layout.fillWidth: true; menu: nameHeaderMenu }
-                        HeaderCell { title: "Type"; columnName: "kind"; Layout.preferredWidth: 90; menu: typeHeaderMenu }
-                        HeaderCell { title: "Size"; columnName: "size"; Layout.preferredWidth: 100; menu: sizeHeaderMenu }
-                        HeaderCell { title: "Modified"; columnName: "modified"; Layout.preferredWidth: 210; menu: modifiedHeaderMenu }
+                        HeaderCell { title: "Name"
+                        columnName: "name"
+                        Layout.fillWidth: true
+                        menu: nameHeaderMenu }
+                        HeaderCell { title: "Type"
+                        columnName: "kind"
+                        Layout.preferredWidth: 90
+                        menu: typeHeaderMenu }
+                        HeaderCell { title: "Size"
+                        columnName: "size"
+                        Layout.preferredWidth: 100
+                        menu: sizeHeaderMenu }
+                        HeaderCell { title: "Modified"
+                        columnName: "modified"
+                        Layout.preferredWidth: 210
+                        menu: modifiedHeaderMenu }
                     }
                 }
 
@@ -449,16 +461,20 @@ ApplicationWindow {
                     keyNavigationEnabled: true
                     highlightMoveDuration: 80
 
-                    Keys.onReturnPressed: function(event) { openCurrentRow(); event.accepted = true }
-                    Keys.onEnterPressed: function(event) { openCurrentRow(); event.accepted = true }
+                    Keys.onReturnPressed: function(event) { openCurrentRow()
+                    event.accepted = true }
+                    Keys.onEnterPressed: function(event) { openCurrentRow()
+                    event.accepted = true }
                     Keys.onPressed: function(event) {
                         if (event.key === Qt.Key_Backspace) {
                             scanPath(parentPath(controller.currentPath))
                             event.accepted = true
                         }
                     }
-                    Keys.onEscapePressed: function(event) { pathField.forceActiveFocus(); event.accepted = true }
-                    Keys.onSpacePressed: function(event) { toggleSelection(fileList.currentIndex); event.accepted = true }
+                    Keys.onEscapePressed: function(event) { pathField.forceActiveFocus()
+                    event.accepted = true }
+                    Keys.onSpacePressed: function(event) { toggleSelection(fileList.currentIndex)
+                    event.accepted = true }
 
                     MouseArea {
                         anchors.fill: parent
@@ -506,13 +522,15 @@ ApplicationWindow {
             text: "Folders first"
             checkable: true
             checked: foldersFirst
-            onTriggered: { foldersFirst = checked; refreshDisplayedRows() }
+            onTriggered: { foldersFirst = checked
+            refreshDisplayedRows() }
         }
         MenuItem {
             text: "Folders always sorted A-B"
             checkable: true
             checked: foldersAlwaysAZ
-            onTriggered: { foldersAlwaysAZ = checked; refreshDisplayedRows() }
+            onTriggered: { foldersAlwaysAZ = checked
+            refreshDisplayedRows() }
         }
         MenuSeparator {}
         MenuItem {
@@ -554,13 +572,31 @@ ApplicationWindow {
 
     Menu {
         id: sizeHeaderMenu
-        MenuItem { text: "Auto"; checkable: true; checked: sizeUnit === "auto"; onTriggered: setSizeUnit("auto") }
+        MenuItem { text: "Auto"
+        checkable: true
+        checked: sizeUnit === "auto"
+        onTriggered: setSizeUnit("auto") }
         MenuSeparator {}
-        MenuItem { text: "B"; checkable: true; checked: sizeUnit === "bytes"; onTriggered: setSizeUnit("bytes") }
-        MenuItem { text: "kB"; checkable: true; checked: sizeUnit === "kb"; onTriggered: setSizeUnit("kb") }
-        MenuItem { text: "MB"; checkable: true; checked: sizeUnit === "mb"; onTriggered: setSizeUnit("mb") }
-        MenuItem { text: "GB"; checkable: true; checked: sizeUnit === "gb"; onTriggered: setSizeUnit("gb") }
-        MenuItem { text: "TB"; checkable: true; checked: sizeUnit === "tb"; onTriggered: setSizeUnit("tb") }
+        MenuItem { text: "B"
+        checkable: true
+        checked: sizeUnit === "bytes"
+        onTriggered: setSizeUnit("bytes") }
+        MenuItem { text: "kB"
+        checkable: true
+        checked: sizeUnit === "kb"
+        onTriggered: setSizeUnit("kb") }
+        MenuItem { text: "MB"
+        checkable: true
+        checked: sizeUnit === "mb"
+        onTriggered: setSizeUnit("mb") }
+        MenuItem { text: "GB"
+        checkable: true
+        checked: sizeUnit === "gb"
+        onTriggered: setSizeUnit("gb") }
+        MenuItem { text: "TB"
+        checkable: true
+        checked: sizeUnit === "tb"
+        onTriggered: setSizeUnit("tb") }
         MenuSeparator {}
         MenuItem {
             text: "Dummy: Hide empty sizes"
@@ -576,7 +612,11 @@ ApplicationWindow {
         radius: 4
         color: sortColumn === columnName ? activeSortHeaderColor : "transparent"
         border.color: sortColumn === columnName ? activeSortBorderColor : "transparent"
-        Label { anchors.centerIn: parent; text: sortLabel(columnName, title); color: "#f9fafb"; font.bold: true; font.family: rowFontFamily }
+        Label { anchors.centerIn: parent
+        text: sortLabel(columnName, title)
+        color: "#f9fafb"
+        font.bold: true
+        font.family: rowFontFamily }
         MouseArea {
             anchors.fill: parent
             acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -629,13 +669,49 @@ ApplicationWindow {
                 RowLayout {
                     anchors.fill: parent
                     spacing: 6
-                    IconImage { Layout.preferredWidth: fileIconSize; Layout.preferredHeight: fileIconSize; Layout.alignment: Qt.AlignVCenter; name: fileIconName(rowDelegate); sourceSize.width: fileIconSize; sourceSize.height: fileIconSize; color: "transparent" }
-                    Label { Layout.fillWidth: true; Layout.fillHeight: true; verticalAlignment: Text.AlignVCenter; text: rowDelegate.name; color: rowDelegate.isDir ? "#bfdbfe" : "#e5e7eb"; elide: Text.ElideRight; font.family: rowFontFamily }
+                    IconImage { Layout.preferredWidth: fileIconSize
+                    Layout.preferredHeight: fileIconSize
+                    Layout.alignment: Qt.AlignVCenter
+                    name: fileIconName(rowDelegate)
+                    sourceSize.width: fileIconSize
+                    sourceSize.height: fileIconSize
+                    color: "transparent" }
+                    Label { Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    verticalAlignment: Text.AlignVCenter
+                    text: rowDelegate.name
+                    color: rowDelegate.isDir ? "#bfdbfe" : "#e5e7eb"
+                    elide: Text.ElideRight
+                    font.family: rowFontFamily }
                 }
             }
-            Cell { columnName: "kind"; selected: isRowSelected(rowDelegate.index); Layout.preferredWidth: 90; Label { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: rowDelegate.kind; color: "#d1d5db"; elide: Text.ElideRight; font.family: rowFontFamily } }
-            Cell { columnName: "size"; selected: isRowSelected(rowDelegate.index); Layout.preferredWidth: 100; Label { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignRight; text: displaySize(rowDelegate.sizeBytes); color: "#d1d5db"; font.family: rowFontFamily } }
-            Cell { columnName: "modified"; selected: isRowSelected(rowDelegate.index); Layout.preferredWidth: 210; Label { anchors.fill: parent; verticalAlignment: Text.AlignVCenter; text: modifiedText(rowDelegate.modifiedSecs); color: "#d1d5db"; elide: Text.ElideRight; font.family: rowFontFamily } }
+            Cell { columnName: "kind"
+            selected: isRowSelected(rowDelegate.index)
+            Layout.preferredWidth: 90
+            Label { anchors.fill: parent
+            verticalAlignment: Text.AlignVCenter
+            text: rowDelegate.kind
+            color: "#d1d5db"
+            elide: Text.ElideRight
+            font.family: rowFontFamily } }
+            Cell { columnName: "size"
+            selected: isRowSelected(rowDelegate.index)
+            Layout.preferredWidth: 100
+            Label { anchors.fill: parent
+            verticalAlignment: Text.AlignVCenter
+            horizontalAlignment: Text.AlignRight
+            text: displaySize(rowDelegate.sizeBytes)
+            color: "#d1d5db"
+            font.family: rowFontFamily } }
+            Cell { columnName: "modified"
+            selected: isRowSelected(rowDelegate.index)
+            Layout.preferredWidth: 210
+            Label { anchors.fill: parent
+            verticalAlignment: Text.AlignVCenter
+            text: modifiedText(rowDelegate.modifiedSecs)
+            color: "#d1d5db"
+            elide: Text.ElideRight
+            font.family: rowFontFamily } }
         }
 
         MouseArea {
@@ -648,8 +724,10 @@ ApplicationWindow {
             onPressed: function(mouse) { handleRowPress(mouse, index) }
             onClicked: function(mouse) { }
             onDoubleClicked: openRow(fileModel.get(index))
-            onReleased: { dragProxy.x = 0; dragProxy.y = 0 }
-            onCanceled: { dragProxy.x = 0; dragProxy.y = 0 }
+            onReleased: { dragProxy.x = 0
+            dragProxy.y = 0 }
+            onCanceled: { dragProxy.x = 0
+            dragProxy.y = 0 }
         }
     }
 
