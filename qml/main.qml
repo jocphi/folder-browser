@@ -349,6 +349,10 @@ ApplicationWindow {
     function displaySize(sizeBytes, row) {
         if (row && row.isDir && row.sizeStatus === "unknown")
             return "unknown";
+        if (row && row.isDir && row.sizeStatus === "scanning")
+            return "scanning";
+        if (row && row.isDir && row.sizeStatus === "error")
+            return "error";
         if (sizeBytes === null || sizeBytes === undefined || sizeBytes < 0)
             return "";
 
@@ -447,6 +451,7 @@ ApplicationWindow {
 
     function scanPath(pathText) {
         pathBar.pathText = String(pathText);
+        controller.followSymlinks = root.followSymlinks
         controller.scanPath(pathBar.pathText);
         selectedPaths = [];
         lastSelectedIndex = -1;
@@ -656,7 +661,10 @@ ApplicationWindow {
                 root.refreshDisplayedRows()
             }
             onShowHiddenToggled: function(checked) { root.showHidden = checked }
-            onFollowSymlinksToggled: function(checked) { root.followSymlinks = checked }
+            onFollowSymlinksToggled: function(checked) {
+                root.followSymlinks = checked
+                root.scanPath(controller.currentPath)
+            }
         }
 
         FileListView {
