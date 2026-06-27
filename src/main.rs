@@ -1,3 +1,4 @@
+pub mod formatting;
 pub mod cxxqt_object;
 
 use cxx_qt::casting::Upcast;
