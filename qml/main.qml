@@ -528,6 +528,54 @@ ApplicationWindow {
     }
 
 
+
+    function setCurrentIndexWithOptionalRange(newIndex, extendSelection) {
+        if (fileModel.count <= 0) {
+            fileListView.currentIndex = -1
+            return
+        }
+
+        newIndex = Math.max(0, Math.min(newIndex, fileModel.count - 1))
+        let oldIndex = Math.max(0, Math.min(fileListView.currentIndex, fileModel.count - 1))
+
+        if (extendSelection) {
+            let anchor = lastSelectedIndex >= 0 ? lastSelectedIndex : oldIndex
+            anchor = Math.max(0, Math.min(anchor, fileModel.count - 1))
+            let fromIndex = Math.min(anchor, newIndex)
+            let toIndex = Math.max(anchor, newIndex)
+            let paths = []
+            for (let index = fromIndex; index <= toIndex; index += 1) {
+                paths.push(rowPathAt(index))
+            }
+            selectedPaths = paths
+            lastSelectedIndex = anchor
+        } else {
+            lastSelectedIndex = -1
+        }
+
+        fileListView.currentIndex = newIndex
+        fileListView.containIndex(newIndex)
+        fileListView.forceListFocus()
+    }
+
+    function pageMoveCurrent(direction, extendSelection) {
+        if (fileModel.count <= 0) {
+            fileListView.currentIndex = -1
+            return
+        }
+        let startIndex = fileListView.currentIndex >= 0 ? fileListView.currentIndex : 0
+        let step = fileListView.pageStep ? fileListView.pageStep() : 10
+        setCurrentIndexWithOptionalRange(startIndex + direction * step, extendSelection)
+    }
+
+    function boundaryMoveCurrent(direction, extendSelection) {
+        if (fileModel.count <= 0) {
+            fileListView.currentIndex = -1
+            return
+        }
+        setCurrentIndexWithOptionalRange(direction < 0 ? 0 : fileModel.count - 1, extendSelection)
+    }
+
     function scanPath(pathText) {
         pathBar.pathText = String(pathText);
         controller.followSymlinks = root.followSymlinks
@@ -794,6 +842,8 @@ ApplicationWindow {
             onEscapeToPathRequested: pathBar.forcePathFocus()
             onToggleSelectionRequested: function(rowIndex) { root.toggleSelection(rowIndex) }
             onShiftCursorRequested: function(direction) { root.handleShiftCursorSelection(direction) }
+            onPageMoveRequested: function(direction, extendSelection) { root.pageMoveCurrent(direction, extendSelection) }
+            onBoundaryMoveRequested: function(direction, extendSelection) { root.boundaryMoveCurrent(direction, extendSelection) }
             onRowPressed: function(mouse, rowIndex) { root.handleRowPress(mouse, rowIndex) }
             onRowDoubleClicked: function(rowIndex) { root.openRow(fileModel.get(rowIndex)) }
         }

@@ -57,6 +57,8 @@ Rectangle {
     signal escapeToPathRequested()
     signal toggleSelectionRequested(int rowIndex)
     signal shiftCursorRequested(int direction)
+    signal pageMoveRequested(int direction, bool extendSelection)
+    signal boundaryMoveRequested(int direction, bool extendSelection)
     signal rowPressed(var mouse, int rowIndex)
     signal rowDoubleClicked(int rowIndex)
 
@@ -72,6 +74,10 @@ Rectangle {
 
     function containIndex(index) {
         fileList.positionViewAtIndex(index, ListView.Contain)
+    }
+
+    function pageStep() {
+        return Math.max(1, Math.floor(fileList.height / Math.max(1, rowHeight)) - 1)
     }
 
     onCurrentIndexChanged: {
@@ -181,6 +187,27 @@ Rectangle {
                 event.accepted = true
             }
             Keys.onPressed: function(event) {
+
+            if (event.key === Qt.Key_PageDown) {
+                fileListView.pageMoveRequested(1, event.modifiers & Qt.ShiftModifier)
+                event.accepted = true
+                return
+            }
+            if (event.key === Qt.Key_PageUp) {
+                fileListView.pageMoveRequested(-1, event.modifiers & Qt.ShiftModifier)
+                event.accepted = true
+                return
+            }
+            if (event.key === Qt.Key_Home) {
+                fileListView.boundaryMoveRequested(-1, event.modifiers & Qt.ShiftModifier)
+                event.accepted = true
+                return
+            }
+            if (event.key === Qt.Key_End) {
+                fileListView.boundaryMoveRequested(1, event.modifiers & Qt.ShiftModifier)
+                event.accepted = true
+                return
+            }
                 if (event.key === Qt.Key_Backspace) {
                     fileListView.goParentRequested()
                     event.accepted = true
