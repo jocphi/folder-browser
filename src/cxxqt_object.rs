@@ -17,6 +17,10 @@ pub mod qobject {
         #[qproperty(QString, status_text, cxx_name = "statusText")]
         #[qproperty(i32, row_count, cxx_name = "rowCount")]
         #[qproperty(i32, update_generation, cxx_name = "updateGeneration")]
+        #[qproperty(bool, follow_symlinks, cxx_name = "followSymlinks")]
+        #[qproperty(bool, is_scanning, cxx_name = "isScanning")]
+        #[qproperty(i32, size_scan_done, cxx_name = "sizeScanDone")]
+        #[qproperty(i32, size_scan_total, cxx_name = "sizeScanTotal")]
         #[namespace = "folder_browser"]
         type FolderBrowserController = super::FolderBrowserControllerRust;
 
@@ -73,7 +77,7 @@ use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use crate::formatting::normalize_local_path;
 use crate::file_row::FileRow;
-use crate::file_size_status::DirectorySizeStatusUpdate;
+use crate::file_size_status::{DirectorySizeStatusUpdate, SizeStatus};
 use crate::scanner::scan_directory;
 use crate::signals::bump_update_generation;
 use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
@@ -87,6 +91,10 @@ pub struct FolderBrowserControllerRust {
     status_text: QString,
     row_count: i32,
     update_generation: i32,
+    follow_symlinks: bool,
+    is_scanning: bool,
+    size_scan_done: i32,
+    size_scan_total: i32,
     pub(crate) rows: Vec<FileRow>,
     pub(crate) scan_generation: u64,
 }
@@ -122,6 +130,7 @@ impl qobject::FolderBrowserController {
         let raw_path = path.to_string();
         let local_path = normalize_local_path(&raw_path);
         let directory = Path::new(&local_path);
+        let follow_symlinks = *self.follow_symlinks();
 
         self.as_mut().set_current_path(QString::from(local_path.clone()));
         let next_generation = self.rust().scan_generation.wrapping_add(1);
@@ -131,6 +140,9 @@ impl qobject::FolderBrowserController {
         if !directory.exists() {
             self.as_mut().rust_mut().rows.clear();
             self.as_mut().set_row_count(0);
+            self.as_mut().set_is_scanning(false);
+            self.as_mut().set_size_scan_done(0);
+            self.as_mut().set_size_scan_total(0);
             bump_update_generation(self.as_mut());
             self.as_mut().set_status_text(QString::from(format!("Path does not exist: {local_path}")));
             return;
@@ -139,12 +151,15 @@ impl qobject::FolderBrowserController {
         if !directory.is_dir() {
             self.as_mut().rust_mut().rows.clear();
             self.as_mut().set_row_count(0);
+            self.as_mut().set_is_scanning(false);
+            self.as_mut().set_size_scan_done(0);
+            self.as_mut().set_size_scan_total(0);
             bump_update_generation(self.as_mut());
             self.as_mut().set_status_text(QString::from(format!("Not a directory: {local_path}")));
             return;
         }
 
-        let rows = match scan_directory(directory) {
+        let rows = match scan_directory(directory, follow_symlinks) {
             Ok(rows) => rows,
             Err(error) => {
                 self.as_mut().rust_mut().rows.clear();
@@ -164,13 +179,33 @@ impl qobject::FolderBrowserController {
             .map(|(index, row)| (index, row.path.clone()))
             .collect();
 
+        let mut rows = rows;
+        for (row_index, _) in &directory_jobs {
+            if let Some(row) = rows.get_mut(*row_index) {
+                row.size_bytes = None;
+                row.size_text.clear();
+                row.size_status = SizeStatus::Scanning;
+            }
+        }
+
         let count = rows.len();
+        let size_scan_total = directory_jobs.len().min(i32::MAX as usize) as i32;
         self.as_mut().rust_mut().rows = rows;
         self.as_mut().set_row_count(count.min(i32::MAX as usize) as i32);
+        self.as_mut().set_size_scan_done(0);
+        self.as_mut().set_size_scan_total(size_scan_total);
+        self.as_mut().set_is_scanning(size_scan_total > 0);
         bump_update_generation(self.as_mut());
-        self.as_mut().set_status_text(QString::from(format!(
-            "Scanned {count} entries in {local_path}; calculating directory sizes"
-        )));
+        if directory_jobs.is_empty() {
+            self.as_mut().set_status_text(QString::from(format!(
+                "Scanned {count} entries in {local_path}"
+            )));
+        } else {
+            self.as_mut().set_status_text(QString::from(format!(
+                "Scanned {count} entries in {local_path}; calculating {} directory sizes",
+                directory_jobs.len()
+            )));
+        }
 
         if !directory_jobs.is_empty() {
             std::thread::spawn(move || {
@@ -180,7 +215,7 @@ impl qobject::FolderBrowserController {
                 for (row_index, dir_path) in directory_jobs {
                     let mut last_progress_update = Instant::now();
 
-                    let result = calculate_directory_size(&dir_path, |partial_size| {
+                    let result = calculate_directory_size(&dir_path, follow_symlinks, |partial_size| {
                         if last_progress_update.elapsed() >= Duration::from_secs(2) {
                             batch.push(
                                 row_index,
@@ -201,6 +236,18 @@ impl qobject::FolderBrowserController {
                         Err(_) => batch.push(row_index, None, DirectorySizeStatusUpdate::Error),
                     }
 
+                    let progress_qt_thread = status_qt_thread.clone();
+                    let _ = progress_qt_thread.queue(move |mut controller| {
+                        if controller.rust().scan_generation == generation {
+                            let total = *controller.size_scan_total();
+                            let next = (*controller.size_scan_done()).saturating_add(1).min(total);
+                            controller.as_mut().set_size_scan_done(next);
+                            controller.as_mut().set_status_text(QString::from(format!(
+                                "Directory sizes: {next} / {total}"
+                            )));
+                        }
+                    });
+
                     batch.flush_if_needed(32, Duration::from_millis(750));
                 }
 
@@ -208,7 +255,12 @@ impl qobject::FolderBrowserController {
 
                 let _ = status_qt_thread.queue(move |mut controller| {
                     if controller.rust().scan_generation == generation {
-                        controller.as_mut().set_status_text(QString::from("Directory size calculation finished"));
+                        let total = *controller.size_scan_total();
+                        controller.as_mut().set_size_scan_done(total);
+                        controller.as_mut().set_is_scanning(false);
+                        controller.as_mut().set_status_text(QString::from(format!(
+                            "Directory size calculation finished ({total} / {total})"
+                        )));
                     }
                 });
             });

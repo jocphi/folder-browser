@@ -20,6 +20,9 @@ ApplicationWindow {
     property bool showHidden: false
     property bool followSymlinks: false
     property string filterText: ""
+    property int sizeScanTotal: countSizeScanTotal(allRows, controller.updateGeneration)
+    property int sizeScanDone: countSizeScanDone(allRows, controller.updateGeneration)
+    property bool isScanningSizes: sizeScanTotal > 0 && sizeScanDone < sizeScanTotal
 
     property int rowHeight: 32
     property int fileIconSize: rowHeight
@@ -164,6 +167,34 @@ ApplicationWindow {
         let escaped = htmlEscape(fileName);
         let datePattern = /(\b\d{4}[-_.]\d{2}[-_.]\d{2}\b|\b\d{8}\b|\b\d{2}[-_.]\d{2}[-_.]\d{4}\b)/g;
         return escaped.replace(datePattern, "<span style='color:" + dateHighlightColor + "'>$1</span>");
+    }
+
+
+    function countSizeScanTotal(rows, generationToken) {
+        let source = Array.from(rows || [])
+        let total = 0
+        for (let index = 0; index < source.length; index += 1) {
+            let row = source[index]
+            if (row && row.isDir) {
+                total += 1
+            }
+        }
+        return total
+    }
+
+    function countSizeScanDone(rows, generationToken) {
+        let source = Array.from(rows || [])
+        let done = 0
+        for (let index = 0; index < source.length; index += 1) {
+            let row = source[index]
+            if (!row || !row.isDir) {
+                continue
+            }
+            if (row.sizeStatus === "done" || row.sizeStatus === "error") {
+                done += 1
+            }
+        }
+        return done
     }
 
     function matchesFilter(row) {
@@ -724,6 +755,9 @@ ApplicationWindow {
             visibleCount: fileListView.count
             totalCount: allRows.length
             filterText: root.filterText
+            isScanning: root.isScanningSizes
+            scanDone: root.sizeScanDone
+            scanTotal: root.sizeScanTotal
             secondaryTextColor: root.secondaryTextColor
         }
     }
