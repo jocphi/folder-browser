@@ -51,6 +51,7 @@ Rectangle {
     property var modifiedTextFunction
 
     signal sortRequested(string columnName)
+    signal headerMenuRequested(string columnName, real sceneX, real sceneY)
     signal openCurrentRequested()
     signal goParentRequested()
     signal escapeToPathRequested()
@@ -108,6 +109,7 @@ Rectangle {
                     activeSortBorderColor: fileListView.activeSortBorderColor
                     headerTextColor: fileListView.headerTextColor
                     onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
                 }
 
                 HeaderCell {
@@ -122,6 +124,7 @@ Rectangle {
                     activeSortBorderColor: fileListView.activeSortBorderColor
                     headerTextColor: fileListView.headerTextColor
                     onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
                 }
 
                 HeaderCell {
@@ -136,6 +139,7 @@ Rectangle {
                     activeSortBorderColor: fileListView.activeSortBorderColor
                     headerTextColor: fileListView.headerTextColor
                     onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
                 }
 
                 HeaderCell {
@@ -150,6 +154,7 @@ Rectangle {
                     activeSortBorderColor: fileListView.activeSortBorderColor
                     headerTextColor: fileListView.headerTextColor
                     onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
                 }
             }
         }

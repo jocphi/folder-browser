@@ -16,6 +16,7 @@ Rectangle {
     property var menu
 
     signal sortRequested(string columnName)
+    signal menuRequested(string columnName, real sceneX, real sceneY)
 
     Layout.fillHeight: true
     radius: 4
@@ -29,6 +30,11 @@ Rectangle {
         return title + (sortAscending ? " ▲" : " ▼")
     }
 
+    function requestHeaderMenu(localX, localY) {
+        let scenePoint = headerCell.mapToItem(null, localX, localY)
+        headerCell.menuRequested(columnName, scenePoint.x, scenePoint.y)
+    }
+
     Label {
         anchors.centerIn: parent
         text: headerCell.sortLabel()
@@ -39,15 +45,18 @@ Rectangle {
 
     MouseArea {
         anchors.fill: parent
-        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        acceptedButtons: Qt.LeftButton
         onClicked: function(mouse) {
-            if (mouse.button === Qt.RightButton) {
-                if (menu) {
-                    menu.popup()
-                }
-            } else {
-                headerCell.sortRequested(columnName)
-            }
+            headerCell.sortRequested(columnName)
+            mouse.accepted = true
+        }
+    }
+
+    TapHandler {
+        acceptedButtons: Qt.RightButton
+        gesturePolicy: TapHandler.WithinBounds
+        onTapped: function(eventPoint, button) {
+            headerCell.requestHeaderMenu(eventPoint.position.x, eventPoint.position.y)
         }
     }
 }

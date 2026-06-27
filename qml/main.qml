@@ -18,6 +18,7 @@ ApplicationWindow {
     property string sortColumn: "name"
     property bool sortAscending: true
     property bool showHidden: false
+    property bool followSymlinks: false
     property string filterText: ""
 
     property int rowHeight: 32
@@ -83,6 +84,23 @@ ApplicationWindow {
         ({ key: "sizeDoneColor", label: "Size done", defaultValue: "#22c55e" }),
         ({ key: "sizeErrorColor", label: "Size error", defaultValue: "#ef4444" })
     ]
+
+
+    function loadInterfaceSettings() {
+        sortColumn = uiSettings.sortColumn || "name"
+        sortAscending = uiSettings.sortAscending
+        showHidden = uiSettings.showHidden
+        followSymlinks = uiSettings.followSymlinks
+        filterText = uiSettings.filterText || ""
+    }
+
+    function saveInterfaceSettings() {
+        uiSettings.sortColumn = sortColumn
+        uiSettings.sortAscending = sortAscending
+        uiSettings.showHidden = showHidden
+        uiSettings.followSymlinks = followSymlinks
+        uiSettings.filterText = filterText
+    }
 
     function loadColorSettings() {
         for (let index = 0; index < colorDefinitions.length; index += 1) {
@@ -378,6 +396,25 @@ ApplicationWindow {
         return secondaryTextColor;
     }
 
+    function openHeaderMenu(columnName, sceneX, sceneY) {
+        let headerMenu = null
+        if (columnName === "name") {
+            headerMenu = nameHeaderMenu
+        } else if (columnName === "kind") {
+            headerMenu = typeHeaderMenu
+        } else if (columnName === "size") {
+            headerMenu = sizeHeaderMenu
+        } else if (columnName === "modified") {
+            headerMenu = modifiedHeaderMenu
+        }
+        if (!headerMenu) {
+            return
+        }
+        headerMenu.x = Math.round(sceneX)
+        headerMenu.y = Math.round(sceneY)
+        headerMenu.open()
+    }
+
     function rebuildRowsFromController() {
         let rows = [];
         for (let row = 0; row < controller.rowCount; row += 1) {
@@ -529,6 +566,17 @@ ApplicationWindow {
         id: fileModel
     }
 
+
+    Settings {
+        id: uiSettings
+        category: "Interface"
+        property string sortColumn: "name"
+        property bool sortAscending: true
+        property bool showHidden: false
+        property bool followSymlinks: false
+        property string filterText: ""
+    }
+
     Settings {
         id: colorSettings
         category: "Colors"
@@ -567,9 +615,17 @@ ApplicationWindow {
         onTriggered: rebuildRowsFromController()
     }
 
-    onShowHiddenChanged: refreshDisplayedRows()
+    onSortColumnChanged: saveInterfaceSettings()
+    onSortAscendingChanged: saveInterfaceSettings()
+    onFilterTextChanged: saveInterfaceSettings()
+    onShowHiddenChanged: {
+        saveInterfaceSettings()
+        refreshDisplayedRows()
+    }
+    onFollowSymlinksChanged: saveInterfaceSettings()
     Component.onCompleted: {
         loadColorSettings()
+        loadInterfaceSettings()
         scanPath(controller.currentPath)
     }
 
@@ -591,6 +647,7 @@ ApplicationWindow {
             pathText: controller.currentPath
             filterText: root.filterText
             showHidden: root.showHidden
+            followSymlinks: root.followSymlinks
             onGoUpRequested: root.scanPath(root.parentPath(controller.currentPath))
             onScanRequested: function(pathText) { root.scanPath(pathText) }
             onColorsRequested: colorConfigPopup.open()
@@ -599,6 +656,7 @@ ApplicationWindow {
                 root.refreshDisplayedRows()
             }
             onShowHiddenToggled: function(checked) { root.showHidden = checked }
+            onFollowSymlinksToggled: function(checked) { root.followSymlinks = checked }
         }
 
         FileListView {
@@ -641,6 +699,7 @@ ApplicationWindow {
             sizeColorFunction: root.sizeColor
             modifiedTextFunction: root.modifiedText
             onSortRequested: function(columnName) { root.setSort(columnName) }
+            onHeaderMenuRequested: function(columnName, sceneX, sceneY) { root.openHeaderMenu(columnName, sceneX, sceneY) }
             onOpenCurrentRequested: root.openCurrentRow()
             onGoParentRequested: root.scanPath(root.parentPath(controller.currentPath))
             onEscapeToPathRequested: pathBar.forcePathFocus()
