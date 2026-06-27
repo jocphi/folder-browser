@@ -304,7 +304,7 @@ ApplicationWindow {
             sortAscending = true;
         }
         refreshDisplayedRows();
-        fileList.forceActiveFocus();
+        fileListView.forceListFocus();
     }
 
     function setSizeUnit(unitName) {
@@ -402,20 +402,20 @@ ApplicationWindow {
             fileModel.append(rows[index]);
         }
         if (fileModel.count > 0) {
-            fileList.currentIndex = Math.max(0, Math.min(fileList.currentIndex, fileModel.count - 1));
+            fileListView.currentIndex = Math.max(0, Math.min(fileListView.currentIndex, fileModel.count - 1));
         } else {
-            fileList.currentIndex = -1;
+            fileListView.currentIndex = -1;
         }
     }
 
     function scanPath(pathText) {
-        pathField.text = String(pathText);
-        controller.scanPath(pathField.text);
+        pathBar.pathText = String(pathText);
+        controller.scanPath(pathBar.pathText);
         selectedPaths = [];
         lastSelectedIndex = -1;
         rebuildRowsFromController();
         Qt.callLater(function () {
-            fileList.forceActiveFocus();
+            fileListView.forceListFocus();
         });
     }
 
@@ -429,8 +429,8 @@ ApplicationWindow {
     }
 
     function openCurrentRow() {
-        if (fileList.currentIndex >= 0 && fileList.currentIndex < fileModel.count) {
-            openRow(fileModel.get(fileList.currentIndex));
+        if (fileListView.currentIndex >= 0 && fileListView.currentIndex < fileModel.count) {
+            openRow(fileModel.get(fileListView.currentIndex));
         }
     }
 
@@ -469,7 +469,7 @@ ApplicationWindow {
     }
 
     function selectRange(index) {
-        let anchor = lastSelectedIndex >= 0 ? lastSelectedIndex : fileList.currentIndex;
+        let anchor = lastSelectedIndex >= 0 ? lastSelectedIndex : fileListView.currentIndex;
         if (anchor < 0)
             anchor = index;
         let first = Math.min(anchor, index);
@@ -488,7 +488,7 @@ ApplicationWindow {
             return;
         }
 
-        let oldIndex = fileList.currentIndex;
+        let oldIndex = fileListView.currentIndex;
         if (oldIndex < 0) {
             oldIndex = 0;
         }
@@ -498,15 +498,15 @@ ApplicationWindow {
             lastSelectedIndex = oldIndex;
         }
 
-        fileList.currentIndex = newIndex;
+        fileListView.currentIndex = newIndex;
         selectRange(newIndex);
-        fileList.positionViewAtIndex(newIndex, ListView.Contain);
-        fileList.forceActiveFocus();
+        fileListView.containIndex(newIndex);
+        fileListView.forceListFocus();
     }
 
     function handleRowPress(mouse, index) {
-        fileList.currentIndex = index;
-        fileList.forceActiveFocus();
+        fileListView.currentIndex = index;
+        fileListView.forceListFocus();
         if (mouse.modifiers & Qt.ShiftModifier) {
             selectRange(index);
         } else if (mouse.modifiers & Qt.ControlModifier) {
@@ -585,184 +585,79 @@ ApplicationWindow {
             Layout.fillWidth: true
         }
 
-        RowLayout {
+        PathBar {
+            id: pathBar
             Layout.fillWidth: true
-            spacing: 8
-
-            Button {
-                text: "Up"
-                onClicked: scanPath(parentPath(controller.currentPath))
+            pathText: controller.currentPath
+            filterText: root.filterText
+            showHidden: root.showHidden
+            onGoUpRequested: root.scanPath(root.parentPath(controller.currentPath))
+            onScanRequested: function(pathText) { root.scanPath(pathText) }
+            onColorsRequested: colorConfigPopup.open()
+            onFilterTextEdited: function(text) {
+                root.filterText = text
+                root.refreshDisplayedRows()
             }
-
-            TextField {
-                id: pathField
-                Layout.fillWidth: true
-                text: controller.currentPath
-                placeholderText: "Enter a directory path, e.g. /home/joc/Pictures"
-                selectByMouse: true
-                onAccepted: scanPath(text)
-            }
-
-            Button {
-                text: "Scan"
-                onClicked: scanPath(pathField.text)
-            }
-
-            Button {
-                text: "Colors"
-                onClicked: colorConfigPopup.open()
-            }
-
-            TextField {
-                id: filterField
-                Layout.preferredWidth: 220
-                text: filterText
-                placeholderText: "Filter/search"
-                selectByMouse: true
-                onTextChanged: {
-                    filterText = text;
-                    refreshDisplayedRows();
-                }
-                ToolTip.visible: hovered
-                ToolTip.text: "Filter by filename, type, or path"
-            }
-
-            CheckBox {
-                id: hiddenToggle
-                text: "Show hidden"
-                checked: showHidden
-                onToggled: showHidden = checked
-                ToolTip.visible: hovered
-                ToolTip.text: "Show entries whose names start with a dot"
-            }
+            onShowHiddenToggled: function(checked) { root.showHidden = checked }
         }
 
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            radius: 8
-            color: panelBackgroundColor
-            border.color: fileList.activeFocus ? panelFocusBorderColor : panelBorderColor
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 10
-                spacing: 6
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 34
-                    color: headerBackgroundColor
-                    radius: 4
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        spacing: 10
-
-                        HeaderCell {
-                            title: "Name"
-                            columnName: "name"
-                            Layout.fillWidth: true
-                            menu: nameHeaderMenu
-                        }
-                        HeaderCell {
-                            title: "Type"
-                            columnName: "kind"
-                            Layout.preferredWidth: 90
-                            menu: typeHeaderMenu
-                        }
-                        HeaderCell {
-                            title: "Size"
-                            columnName: "size"
-                            Layout.preferredWidth: 100
-                            menu: sizeHeaderMenu
-                        }
-                        HeaderCell {
-                            title: "Modified"
-                            columnName: "modified"
-                            Layout.preferredWidth: 210
-                            menu: modifiedHeaderMenu
-                        }
-                    }
-                }
-
-                ListView {
-                    id: fileList
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    spacing: 1
-                    model: fileModel
-                    focus: true
-                    activeFocusOnTab: true
-                    keyNavigationEnabled: true
-                    highlightMoveDuration: 80
-
-                    Keys.onReturnPressed: function (event) {
-                        openCurrentRow();
-                        event.accepted = true;
-                    }
-                    Keys.onEnterPressed: function (event) {
-                        openCurrentRow();
-                        event.accepted = true;
-                    }
-                    Keys.onPressed: function (event) {
-                        if (event.key === Qt.Key_Backspace) {
-                            scanPath(parentPath(controller.currentPath));
-                            event.accepted = true;
-                        } else if ((event.key === Qt.Key_Up || event.key === Qt.Key_Down) && (event.modifiers & Qt.ShiftModifier)) {
-                            handleShiftCursorSelection(event.key === Qt.Key_Up ? -1 : 1);
-                            event.accepted = true;
-                        }
-                    }
-                    Keys.onEscapePressed: function (event) {
-                        pathField.forceActiveFocus();
-                        event.accepted = true;
-                    }
-                    Keys.onSpacePressed: function (event) {
-                        toggleSelection(fileList.currentIndex);
-                        event.accepted = true;
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.NoButton
-                        hoverEnabled: false
-                        propagateComposedEvents: true
-                        z: 10
-                        onWheel: function (wheel) {
-                            let maxY = Math.max(0, fileList.contentHeight - fileList.height);
-                            let step = wheel.angleDelta.y * 3.0;
-                            fileList.contentY = Math.max(0, Math.min(maxY, fileList.contentY - step));
-                            wheel.accepted = true;
-                        }
-                    }
-
-                    delegate: RowDelegate {}
-                }
-
-                Label {
-                    visible: fileList.count === 0
-                    text: allRows.length > 0 && !showHidden ? "Only hidden entries are available. Enable Show hidden to display them." : "No entries to display. Choose an existing directory and press Scan."
-                    color: emptyTextColor
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                }
-            }
+        FileListView {
+            id: fileListView
+            fileModel: fileModel
+            sortColumn: root.sortColumn
+            sortAscending: root.sortAscending
+            rowHeight: root.rowHeight
+            fileIconSize: root.fileIconSize
+            rowFontFamily: root.rowFontFamily
+            panelBackgroundColor: root.panelBackgroundColor
+            panelBorderColor: root.panelBorderColor
+            panelFocusBorderColor: root.panelFocusBorderColor
+            headerBackgroundColor: root.headerBackgroundColor
+            emptyTextColor: root.emptyTextColor
+            rowEvenColor: root.rowEvenColor
+            rowOddColor: root.rowOddColor
+            selectedRowColor: root.selectedRowColor
+            keyboardCurrentRowColor: root.keyboardCurrentRowColor
+            activeSortHeaderColor: root.activeSortHeaderColor
+            activeSortColumnColor: root.activeSortColumnColor
+            activeSortColumnSelectedColor: root.activeSortColumnSelectedColor
+            activeSortColumnCurrentColor: root.activeSortColumnCurrentColor
+            activeSortBorderColor: root.activeSortBorderColor
+            headerTextColor: root.headerTextColor
+            folderTextColor: root.folderTextColor
+            fileTextColor: root.fileTextColor
+            secondaryTextColor: root.secondaryTextColor
+            showHidden: root.showHidden
+            allRowsLength: root.allRows.length
+            nameHeaderMenu: root.nameHeaderMenu
+            typeHeaderMenu: root.typeHeaderMenu
+            sizeHeaderMenu: root.sizeHeaderMenu
+            modifiedHeaderMenu: root.modifiedHeaderMenu
+            isRowSelectedFunction: root.isRowSelected
+            fileIconNameFunction: root.fileIconName
+            uriListFromPathFunction: root.uriListFromPath
+            highlightedFileNameFunction: root.highlightedFileName
+            displaySizeFunction: root.displaySize
+            sizeColorFunction: root.sizeColor
+            modifiedTextFunction: root.modifiedText
+            onSortRequested: function(columnName) { root.setSort(columnName) }
+            onOpenCurrentRequested: root.openCurrentRow()
+            onGoParentRequested: root.scanPath(root.parentPath(controller.currentPath))
+            onEscapeToPathRequested: pathBar.forcePathFocus()
+            onToggleSelectionRequested: function(rowIndex) { root.toggleSelection(rowIndex) }
+            onShiftCursorRequested: function(direction) { root.handleShiftCursorSelection(direction) }
+            onRowPressed: function(mouse, rowIndex) { root.handleRowPress(mouse, rowIndex) }
+            onRowDoubleClicked: function(rowIndex) { root.openRow(fileModel.get(rowIndex)) }
         }
 
-        RowLayout {
+        StatusBar {
             Layout.fillWidth: true
-            Label {
-                Layout.fillWidth: true
-                text: controller.statusText + " — " + selectedPaths.length + " selected"
-                elide: Text.ElideRight
-            }
-            Label {
-                text: filterText.length > 0 ? fileList.count + " / " + allRows.length + " matches" : fileList.count + " / " + allRows.length + " items"
-            }
+            statusText: controller.statusText
+            selectedCount: selectedPaths.length
+            visibleCount: fileListView.count
+            totalCount: allRows.length
+            filterText: root.filterText
+            secondaryTextColor: root.secondaryTextColor
         }
     }
 
@@ -870,283 +765,20 @@ ApplicationWindow {
         }
     }
 
-    ColorDialog {
-        id: appColorDialog
-        property string targetColorProperty: ""
-        title: "Select color"
-        selectedColor: targetColorProperty.length > 0 ? root[targetColorProperty] : "white"
-        onSelectedColorChanged: {
-            if (visible && targetColorProperty.length > 0) {
-                root[targetColorProperty] = selectedColor
-            }
-        }
-        onAccepted: {
-            if (targetColorProperty.length > 0) {
-                root[targetColorProperty] = selectedColor
-            }
-        }
-    }
-
-    Popup {
+        ColorConfigDialog {
         id: colorConfigPopup
-        modal: true
-        focus: true
-        width: Math.min(root.width - 48, 640)
-        height: Math.min(root.height - 48, 640)
-        anchors.centerIn: parent
-        padding: 12
-        background: Rectangle {
-            color: panelBackgroundColor
-            border.color: panelFocusBorderColor
-            radius: 8
-        }
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 10
-            Label {
-                text: "Colors"
-                color: titleTextColor
-                font.bold: true
-                font.pixelSize: 20
-                Layout.fillWidth: true
-            }
-            Label {
-                text: "Click a color rectangle to change the color immediately. Apply saves to the config file."
-                color: secondaryTextColor
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                ColumnLayout {
-                    width: colorConfigPopup.width - 36
-                    spacing: 6
-                    Repeater {
-                        model: colorDefinitions
-                        delegate: Rectangle {
-                            Layout.fillWidth: true
-                            height: 36
-                            radius: 4
-                            color: index % 2 === 0 ? rowEvenColor : rowOddColor
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 10
-                                Label {
-                                    text: modelData.label
-                                    color: secondaryTextColor
-                                    font.family: rowFontFamily
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
-                                }
-                                Rectangle {
-                                    Layout.preferredWidth: 78
-                                    Layout.preferredHeight: 24
-                                    radius: 4
-                                    color: root[modelData.key]
-                                    border.color: panelFocusBorderColor
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            appColorDialog.targetColorProperty = modelData.key
-                                            appColorDialog.selectedColor = root[modelData.key]
-                                            appColorDialog.open()
-                                        }
-                                    }
-                                }
-                                Label {
-                                    text: String(root[modelData.key])
-                                    color: secondaryTextColor
-                                    font.family: rowFontFamily
-                                    Layout.preferredWidth: 105
-                                    elide: Text.ElideRight
-                                }
-                                Button { text: "Reset"; onClicked: resetColorSetting(modelData.key) }
-                            }
-                        }
-                    }
-                }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                Button { text: "Reset all"; onClicked: resetAllColors() }
-                Button { text: "Cancel"; onClicked: { loadColorSettings(); colorConfigPopup.close() } }
-                Button { text: "Apply"; onClicked: { applyColorSettings(); colorConfigPopup.close() } }
-            }
-        }
+        colorTarget: root
+        settingsTarget: colorSettings
+        colorDefinitions: root.colorDefinitions
+        rowFontFamily: root.rowFontFamily
+        titleTextColor: root.titleTextColor
+        panelBackgroundColor: root.panelBackgroundColor
+        panelFocusBorderColor: root.panelFocusBorderColor
+        secondaryTextColor: root.secondaryTextColor
+        rowEvenColor: root.rowEvenColor
+        rowOddColor: root.rowOddColor
     }
 
-    component HeaderCell: Rectangle {
-        property string title
-        property string columnName
-        property var menu
-        Layout.fillHeight: true
-        radius: 4
-        color: sortColumn === columnName ? activeSortHeaderColor : "transparent"
-        border.color: sortColumn === columnName ? activeSortBorderColor : "transparent"
-        Label {
-            anchors.centerIn: parent
-            text: sortLabel(columnName, title)
-            color: headerTextColor
-            font.bold: true
-            font.family: rowFontFamily
-        }
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
-            onClicked: function (mouse) {
-                if (mouse.button === Qt.RightButton)
-                    menu.popup();
-                else
-                    setSort(columnName);
-            }
-        }
-    }
 
-    component RowDelegate: Rectangle {
-        id: rowDelegate
-        required property int index
-        required property string name
-        required property string kind
-        required property double sizeBytes
-        required property string sizeStatus
-        required property double modifiedSecs
-        required property string path
-        required property bool isDir
-        width: fileList.width
-        height: rowHeight
-        radius: 4
-        color: isRowSelected(index) && fileList.currentIndex === index
-               ? keyboardCurrentRowColor
-               : (isRowSelected(index)
-                  ? selectedRowColor
-                  : (fileList.currentIndex === index ? keyboardCurrentRowColor : (index % 2 === 0 ? "#1f2937" : panelBackgroundColor)))
 
-        Item {
-            id: dragProxy
-            width: 1
-            height: 1
-            visible: false
-            Drag.active: rowMouseArea.drag.active
-            Drag.dragType: Drag.Automatic
-            Drag.supportedActions: Qt.CopyAction
-            Drag.mimeData: {
-                "text/uri-list": uriListFromPath(rowDelegate.path),
-                "text/plain": rowDelegate.path
-            }
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            spacing: 10
-            Cell {
-                columnName: "name"
-                selected: isRowSelected(rowDelegate.index)
-                current: fileList.currentIndex === rowDelegate.index
-                Layout.fillWidth: true
-                RowLayout {
-                    anchors.fill: parent
-                    spacing: 6
-                    IconImage {
-                        Layout.preferredWidth: fileIconSize
-                        Layout.preferredHeight: fileIconSize
-                        Layout.alignment: Qt.AlignVCenter
-                        name: fileIconName(rowDelegate)
-                        sourceSize.width: fileIconSize
-                        sourceSize.height: fileIconSize
-                        color: "transparent"
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        verticalAlignment: Text.AlignVCenter
-                        text: highlightedFileName(rowDelegate.name)
-                        textFormat: Text.RichText
-                        color: rowDelegate.isDir ? folderTextColor : fileTextColor
-                        elide: Text.ElideRight
-                        font.family: rowFontFamily
-                    }
-                }
-            }
-            Cell {
-                columnName: "kind"
-                selected: isRowSelected(rowDelegate.index)
-                current: fileList.currentIndex === rowDelegate.index
-                Layout.preferredWidth: 90
-                Label {
-                    anchors.fill: parent
-                    verticalAlignment: Text.AlignVCenter
-                    text: rowDelegate.kind
-                    color: secondaryTextColor
-                    elide: Text.ElideRight
-                    font.family: rowFontFamily
-                }
-            }
-            Cell {
-                columnName: "size"
-                selected: isRowSelected(rowDelegate.index)
-                current: fileList.currentIndex === rowDelegate.index
-                Layout.preferredWidth: 100
-                Label {
-                    anchors.fill: parent
-                    verticalAlignment: Text.AlignVCenter
-                    horizontalAlignment: Text.AlignRight
-                    text: displaySize(rowDelegate.sizeBytes, rowDelegate)
-                    color: sizeColor(rowDelegate)
-                    font.family: rowFontFamily
-                }
-            }
-            Cell {
-                columnName: "modified"
-                selected: isRowSelected(rowDelegate.index)
-                current: fileList.currentIndex === rowDelegate.index
-                Layout.preferredWidth: 210
-                Label {
-                    anchors.fill: parent
-                    verticalAlignment: Text.AlignVCenter
-                    text: modifiedText(rowDelegate.modifiedSecs)
-                    color: secondaryTextColor
-                    elide: Text.ElideRight
-                    font.family: rowFontFamily
-                }
-            }
-        }
-
-        MouseArea {
-            id: rowMouseArea
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            drag.target: dragProxy
-            drag.axis: Drag.XAndYAxis
-            drag.threshold: 8
-            onPressed: function (mouse) {
-                handleRowPress(mouse, index);
-            }
-            onClicked: function (mouse) {}
-            onDoubleClicked: openRow(fileModel.get(index))
-            onReleased: {
-                dragProxy.x = 0;
-                dragProxy.y = 0;
-            }
-            onCanceled: {
-                dragProxy.x = 0;
-                dragProxy.y = 0;
-            }
-        }
-    }
-
-    component Cell: Rectangle {
-        property string columnName
-        property bool selected: false
-        property bool current: false
-        Layout.fillHeight: true
-        radius: 3
-        color: sortColumn === columnName ? (selected ? activeSortColumnSelectedColor : (current ? activeSortColumnCurrentColor : activeSortColumnColor)) : "transparent"
-    }
 }
