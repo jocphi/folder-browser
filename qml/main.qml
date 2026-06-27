@@ -20,6 +20,7 @@ ApplicationWindow {
     property bool showHidden: false
     property bool followSymlinks: false
     property string filterText: ""
+    property string savedStartupPath: ""
     property int sizeScanTotal: countSizeScanTotal(allRows, controller.updateGeneration)
     property int sizeScanDone: countSizeScanDone(allRows, controller.updateGeneration)
     property bool isScanningSizes: sizeScanTotal > 0 && sizeScanDone < sizeScanTotal
@@ -95,6 +96,7 @@ ApplicationWindow {
         showHidden = uiSettings.showHidden
         followSymlinks = uiSettings.followSymlinks
         filterText = uiSettings.filterText || ""
+        savedStartupPath = uiSettings.currentPath || ""
     }
 
     function saveInterfaceSettings() {
@@ -384,6 +386,8 @@ ApplicationWindow {
             return "scanning";
         if (row && row.isDir && row.sizeStatus === "error")
             return "error";
+        if (row && row.isDir && row.sizeStatus === "stale" && (sizeBytes === null || sizeBytes === undefined || sizeBytes < 0))
+            return "stale";
         if (sizeBytes === null || sizeBytes === undefined || sizeBytes < 0)
             return "";
 
@@ -422,6 +426,8 @@ ApplicationWindow {
             return secondaryTextColor;
         if (row.sizeStatus === "unknown")
             return selectedRowColor;
+        if (row.sizeStatus === "stale")
+            return sizeScanningColor;
         if (row.sizeStatus === "scanning")
             return sizeScanningColor;
         if (row.sizeStatus === "done")
@@ -467,23 +473,66 @@ ApplicationWindow {
         refreshDisplayedRows();
     }
 
-    function refreshDisplayedRows() {
-        let rows = sortRows(filterRows(allRows));
-        fileModel.clear();
-        for (let index = 0; index < rows.length; index += 1) {
-            fileModel.append(rows[index]);
+    function restoreCurrentIndexAfterModelRefresh(preservedPath, fallbackIndex) {
+        if (fileListView.count <= 0) {
+            fileListView.currentIndex = -1
+            return
         }
-        if (fileModel.count > 0) {
-            fileListView.currentIndex = Math.max(0, Math.min(fileListView.currentIndex, fileModel.count - 1));
-        } else {
-            fileListView.currentIndex = -1;
+
+        let targetIndex = Math.max(0, Math.min(fallbackIndex, fileListView.count - 1))
+        if (fileListView.currentIndex !== targetIndex) {
+            fileListView.currentIndex = targetIndex
         }
     }
+
+
+
+    function refreshDisplayedRows() {
+        let rows = sortRows(filterRows(allRows))
+        let sameShape = fileModel.count === rows.length
+
+        if (sameShape) {
+            for (let index = 0; index < rows.length; index += 1) {
+                if (String(fileModel.get(index).path || "") !== String(rows[index].path || "")) {
+                    sameShape = false
+                    break
+                }
+            }
+        }
+
+        if (sameShape) {
+            for (let index = 0; index < rows.length; index += 1) {
+                let row = rows[index]
+                fileModel.setProperty(index, "name", row.name)
+                fileModel.setProperty(index, "kind", row.kind)
+                fileModel.setProperty(index, "sizeBytes", row.sizeBytes)
+                fileModel.setProperty(index, "sizeStatus", row.sizeStatus)
+                fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)
+                fileModel.setProperty(index, "path", row.path)
+                fileModel.setProperty(index, "isDir", row.isDir)
+            }
+            return
+        }
+
+        let preservedIndex = fileListView.currentIndex
+        fileModel.clear()
+        for (let index = 0; index < rows.length; index += 1) {
+            fileModel.append(rows[index])
+        }
+
+        if (fileModel.count > 0) {
+            fileListView.currentIndex = Math.max(0, Math.min(preservedIndex, fileModel.count - 1))
+        } else {
+            fileListView.currentIndex = -1
+        }
+    }
+
 
     function scanPath(pathText) {
         pathBar.pathText = String(pathText);
         controller.followSymlinks = root.followSymlinks
         controller.scanPath(pathBar.pathText);
+        uiSettings.currentPath = pathBar.pathText
         selectedPaths = [];
         lastSelectedIndex = -1;
         rebuildRowsFromController();
@@ -611,6 +660,7 @@ ApplicationWindow {
         property bool showHidden: false
         property bool followSymlinks: false
         property string filterText: ""
+        property string currentPath: ""
     }
 
     Settings {
@@ -662,7 +712,7 @@ ApplicationWindow {
     Component.onCompleted: {
         loadColorSettings()
         loadInterfaceSettings()
-        scanPath(controller.currentPath)
+        scanPath(savedStartupPath.length > 0 ? savedStartupPath : controller.currentPath)
     }
 
     ColumnLayout {
