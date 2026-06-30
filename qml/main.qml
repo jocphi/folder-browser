@@ -250,6 +250,19 @@ ApplicationWindow {
         return name.slice(index + 1);
     }
 
+    function displayType(row) {
+        if (!row)
+            return "";
+        let mime = String(row.mimeType || "");
+        if (row.isDir || mime === "inode/directory")
+            return "Folder";
+        if (mime === "inode/symlink")
+            return "Symlink";
+        if (mime.length > 0)
+            return mime;
+        return row.kind || "";
+    }
+
     function fileIconName(row) {
         if (!row)
             return "text-x-generic";
@@ -384,7 +397,7 @@ ApplicationWindow {
                 if (foldersAlwaysAZ && left.isDir && right.isDir)
                     return result;
             } else if (column === "kind") {
-                result = compareText(left.kind, right.kind);
+                result = compareText(displayType(left), displayType(right));
             } else if (column === "size") {
                 result = compareNullableNumber(left.sizeBytes, right.sizeBytes);
             } else if (column === "modified") {
@@ -538,6 +551,7 @@ ApplicationWindow {
             rows.push({
                 name: controller.fileName(row),
                 kind: controller.fileKind(row),
+                mimeType: controller.fileMimeType(row),
                 sizeBytes: controller.fileSizeBytes(row),
                 sizeStatus: controller.fileSizeStatus(row),
                 modifiedSecs: controller.fileModifiedSecs(row),
@@ -589,6 +603,7 @@ ApplicationWindow {
                 let row = rows[index]
                 fileModel.setProperty(index, "name", row.name)
                 fileModel.setProperty(index, "kind", row.kind)
+                fileModel.setProperty(index, "mimeType", row.mimeType !== undefined ? row.mimeType : "")
                 fileModel.setProperty(index, "sizeBytes", row.sizeBytes)
                 fileModel.setProperty(index, "sizeStatus", row.sizeStatus)
                 fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)

@@ -9,11 +9,14 @@ Rectangle {
     required property int index
     required property string name
     required property string kind
+    required property string mimeType
     required property double sizeBytes
     required property string sizeStatus
     required property double modifiedSecs
     required property double durationSecs
     required property string codec
+    required property string videoCodec
+    required property string audioCodec
     required property double bitrate
     required property double fps
     required property double mediaWidth
@@ -133,12 +136,26 @@ Rectangle {
         return String(Math.round(Number(value)))
     }
 
+    function displayTypeText() {
+        let mime = String(rowDelegate.mimeType || "")
+        if (rowDelegate.isDir || mime === "inode/directory")
+            return "Folder"
+        if (mime === "inode/symlink")
+            return "Symlink"
+        if (mime.length > 0)
+            return mime
+        return rowDelegate.kind
+    }
+
     function textForColumn(columnName) {
-        if (columnName === "kind") return rowDelegate.kind
+        if (columnName === "kind") return rowDelegate.displayTypeText()
+        if (columnName === "mimeType") return rowDelegate.displayTypeText()
         if (columnName === "size") return rowDelegate.displaySizeFunction ? rowDelegate.displaySizeFunction(rowDelegate.sizeBytes, rowDelegate) : ""
         if (columnName === "modified") return rowDelegate.modifiedTextFunction ? rowDelegate.modifiedTextFunction(rowDelegate.modifiedSecs) : ""
         if (columnName === "duration") return rowDelegate.displayDuration(rowDelegate.durationSecs)
         if (columnName === "codec") return rowDelegate.codec
+        if (columnName === "videoCodec") return rowDelegate.videoCodec
+        if (columnName === "audioCodec") return rowDelegate.audioCodec
         if (columnName === "bitrate") return rowDelegate.displayBitrate(rowDelegate.bitrate)
         if (columnName === "fps") return rowDelegate.displayDecimal(rowDelegate.fps, 2)
         if (columnName === "width") return rowDelegate.displayPositiveInteger(rowDelegate.mediaWidth)
