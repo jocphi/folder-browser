@@ -8,20 +8,20 @@ RowLayout {
     property alias pathText: pathField.text
     property string filterText: ""
     property bool showHidden: false
+    property bool followSymlinks: false
 
     signal goUpRequested()
     signal scanRequested(string pathText)
     signal colorsRequested()
     signal filterTextEdited(string text)
     signal showHiddenToggled(bool checked)
+    signal followSymlinksToggled(bool checked)
 
     spacing: 8
 
     function forcePathFocus() {
         pathField.forceActiveFocus()
     }
-
-    Button { text: "Up"; onClicked: pathBar.goUpRequested() }
 
     TextField {
         id: pathField
@@ -52,5 +52,14 @@ RowLayout {
         onToggled: pathBar.showHiddenToggled(checked)
         ToolTip.visible: hovered
         ToolTip.text: "Show entries whose names start with a dot"
+    }
+
+    CheckBox {
+        id: followLinksToggle
+        text: "Follow links"
+        checked: pathBar.followSymlinks
+        onToggled: pathBar.followSymlinksToggled(checked)
+        ToolTip.visible: hovered
+        ToolTip.text: "Follow symbolic links when scanning and calculating folder sizes"
     }
 }

@@ -16,6 +16,11 @@ Rectangle {
     property var menu
 
     signal sortRequested(string columnName)
+
+    function headerHorizontalAlignment() {
+        return columnName === "name" ? Text.AlignLeft : Text.AlignRight
+    }
+
     signal menuRequested(string columnName, real sceneX, real sceneY)
 
     Layout.fillHeight: true

@@ -325,14 +325,18 @@ ApplicationWindow {
     }
 
     function filterRows(rows) {
-        let source = Array.from(rows || []);
-        if (!showHidden) {
-            source = source.filter(function (row) {
-                return !isHiddenRow(row);
-            });
-        }
-        return source.filter(function (row) {
-            return matchesFilter(row);
+        let query = filterText.trim().toLowerCase();
+        return rows.filter(function(row) {
+            if (isParentEntry(row))
+                return true;
+            if (!showHidden && row.name.startsWith('.'))
+                return false;
+            if (query.length === 0)
+                return true;
+            return row.name.toLowerCase().indexOf(query) !== -1
+                   || row.kind.toLowerCase().indexOf(query) !== -1
+                   || String(row.mimeType || '').toLowerCase().indexOf(query) !== -1
+                   || row.path.toLowerCase().indexOf(query) !== -1;
         });
     }
 
