@@ -1184,6 +1184,31 @@ ApplicationWindow {
         }
 
 
+
+        Shortcut {
+            id: trashConfirmYesShortcut
+            sequence: "Y"
+            context: Qt.ApplicationShortcut
+            enabled: trashConfirmDialog.opened
+            onActivated: root.confirmTrashSelected()
+        }
+
+        Shortcut {
+            id: trashConfirmNoShortcut
+            sequence: "N"
+            context: Qt.ApplicationShortcut
+            enabled: trashConfirmDialog.opened
+            onActivated: root.cancelTrashSelected()
+        }
+
+        Shortcut {
+            id: trashConfirmEscapeShortcut
+            sequence: "Escape"
+            context: Qt.ApplicationShortcut
+            enabled: trashConfirmDialog.opened
+            onActivated: root.cancelTrashSelected()
+        }
+
         Dialog {
             id: trashConfirmDialog
             modal: true
@@ -1193,16 +1218,7 @@ ApplicationWindow {
             standardButtons: Dialog.NoButton
             closePolicy: Popup.CloseOnEscape
             onOpened: forceActiveFocus()
-
-            Keys.onPressed: function(event) {
-                if (event.text === "y" || event.text === "Y") {
-                    root.confirmTrashSelected()
-                    event.accepted = true
-                } else if (event.text === "n" || event.text === "N" || event.key === Qt.Key_Escape) {
-                    root.cancelTrashSelected()
-                    event.accepted = true
-                }
-            }
+            onClosed: root.pendingTrashPaths = []
 
             ColumnLayout {
                 spacing: 12
