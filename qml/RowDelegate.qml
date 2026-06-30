@@ -22,10 +22,14 @@ Rectangle {
     property string sortColumn: "name"
     property bool selected: false
     property bool current: false
+    property bool rangeAnchor: false
 
     property color rowEvenColor: "#1f2937"
     property color rowOddColor: "#20242b"
     property color selectedRowColor: "#7f1d1d"
+    property color rangeAnchorMarkerColor: "#fbbf24"
+    property string rangeAnchorMarkerMode: "lighter"
+    property real rangeAnchorMarkerPercent: 10
     property color keyboardCurrentRowColor: "#14532d"
     property color activeSortColumnColor: "#2b3544"
     property color activeSortColumnSelectedColor: "#991b1b"
@@ -65,6 +69,29 @@ Rectangle {
     radius: 4
     color: rowVisualColor()
 
+
+            function rangeAnchorMarkerBaseColor() {
+        // Match the row's actual visual background before calculating lighter/darker marker shades.
+        // If the anchor is also the current row, use the current-row color, not the selected-row color.
+        let baseColor = current ? keyboardCurrentRowColor : selectedRowColor
+        return index % 2 === 0 ? baseColor : Qt.darker(baseColor, 1.10)
+    }
+
+    function rangeAnchorMarkerVisualColor() {
+        let factor = 1 + Math.max(0, rangeAnchorMarkerPercent) / 100
+        let baseColor = rangeAnchorMarkerBaseColor()
+
+        if (rangeAnchorMarkerMode === "custom") {
+            return rangeAnchorMarkerColor
+        }
+
+        if (rangeAnchorMarkerMode === "darker") {
+            return Qt.darker(baseColor, factor)
+        }
+
+        return Qt.lighter(baseColor, factor)
+    }
+
     function callOrEmpty(fn, arg1, arg2) {
         if (fn) {
             return fn(arg1, arg2)
@@ -72,8 +99,25 @@ Rectangle {
         return ""
     }
 
+    Rectangle {
+        id: rangeAnchorMarker
+        anchors.fill: parent
+        anchors.margins: 0
+        radius: rowDelegate.radius
+        visible: rowDelegate.rangeAnchor && rowDelegate.selected
+
+        // Draw the anchor marker as an outline, not as a filled inner background.
+        // This keeps the row's selected/current fill intact and makes the marker itself visible.
+        color: "transparent"
+        border.color: rowDelegate.rangeAnchorMarkerVisualColor()
+        border.width: visible ? 2 : 0
+        opacity: 1.0
+        z: 4
+    }
+
     Item {
         id: dragProxy
+        z: 2
         width: 1
         height: 1
         visible: false
@@ -87,6 +131,7 @@ Rectangle {
     }
 
     RowLayout {
+        z: 2
         anchors.fill: parent
         anchors.leftMargin: 8
         anchors.rightMargin: 8
@@ -97,6 +142,7 @@ Rectangle {
             sortColumn: rowDelegate.sortColumn
             selected: rowDelegate.selected
             current: rowDelegate.current
+            rangeAnchor: rowDelegate.rangeAnchor
             activeSortColumnColor: rowDelegate.activeSortColumnColor
             activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
             activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
@@ -130,6 +176,7 @@ Rectangle {
             sortColumn: rowDelegate.sortColumn
             selected: rowDelegate.selected
             current: rowDelegate.current
+            rangeAnchor: rowDelegate.rangeAnchor
             activeSortColumnColor: rowDelegate.activeSortColumnColor
             activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
             activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
@@ -150,6 +197,7 @@ Rectangle {
             sortColumn: rowDelegate.sortColumn
             selected: rowDelegate.selected
             current: rowDelegate.current
+            rangeAnchor: rowDelegate.rangeAnchor
             activeSortColumnColor: rowDelegate.activeSortColumnColor
             activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
             activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
@@ -170,6 +218,7 @@ Rectangle {
             sortColumn: rowDelegate.sortColumn
             selected: rowDelegate.selected
             current: rowDelegate.current
+            rangeAnchor: rowDelegate.rangeAnchor
             activeSortColumnColor: rowDelegate.activeSortColumnColor
             activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
             activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
@@ -213,6 +262,7 @@ Rectangle {
         property string sortColumn
         property bool selected: false
         property bool current: false
+        property bool rangeAnchor: false
         property color activeSortColumnColor: "#2b3544"
         property color activeSortColumnSelectedColor: "#991b1b"
         property color activeSortColumnCurrentColor: "#2A894D"
@@ -235,8 +285,10 @@ Rectangle {
 
         Layout.fillHeight: true
         radius: 3
-        color: sortColumn === columnName
-               ? activeSortColumnVisualColor()
-               : "transparent"
+        color: rangeAnchor
+               ? "transparent"
+               : (sortColumn === columnName
+                  ? activeSortColumnVisualColor()
+                  : "transparent")
     }
 }
