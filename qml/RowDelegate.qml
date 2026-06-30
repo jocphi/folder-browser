@@ -169,14 +169,7 @@ Rectangle {
     }
 
     function horizontalAlignmentForColumn(columnName) {
-        return columnName === "size"
-               || columnName === "duration"
-               || columnName === "bitrate"
-               || columnName === "fps"
-               || columnName === "width"
-               || columnName === "height"
-               ? Text.AlignRight
-               : Text.AlignLeft
+        return columnName === "name" ? Text.AlignLeft : Text.AlignRight
     }
 
     function callOrEmpty(fn, arg1, arg2) {

@@ -392,6 +392,8 @@ ApplicationWindow {
             }
 
             let result = 0;
+            if (isParentEntry(left) && !isParentEntry(right)) return -1;
+            if (!isParentEntry(left) && isParentEntry(right)) return 1;
             if (column === "name") {
                 result = compareText(left.name, right.name);
                 if (foldersAlwaysAZ && left.isDir && right.isDir)
@@ -545,8 +547,26 @@ ApplicationWindow {
         headerMenu.open()
     }
 
+    function parentEntryRow() {
+        let current = String(controller.currentPath || "")
+        if (current.length === 0) return null
+        let parent = parentPath(current)
+        if (!parent || parent === current) return null
+        return {
+            name: "..", kind: "folder", mimeType: "inode/directory",
+            sizeBytes: -1, sizeStatus: "unknown", modifiedSecs: -1,
+            durationSecs: -1, codec: "", videoCodec: "", audioCodec: "",
+            bitrate: -1, fps: -1, mediaWidth: -1, mediaHeight: -1,
+            path: parent, isDir: true, isParentEntry: true
+        }
+    }
+
+    function isParentEntry(row) { return row && row.isParentEntry === true }
+
     function rebuildRowsFromController() {
         let rows = [];
+        let parentEntry = parentEntryRow();
+        if (parentEntry) rows.push(parentEntry);
         for (let row = 0; row < controller.rowCount; row += 1) {
             rows.push({
                 name: controller.fileName(row),
@@ -564,7 +584,8 @@ ApplicationWindow {
                 mediaWidth: controller.fileMediaWidth(row),
                 mediaHeight: controller.fileMediaHeight(row),
                 path: controller.filePath(row),
-                isDir: controller.fileIsDir(row)
+                isDir: controller.fileIsDir(row),
+                isParentEntry: false
             });
         }
         allRows = rows;
