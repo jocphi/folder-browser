@@ -388,6 +388,18 @@ ApplicationWindow {
                 result = compareNullableNumber(left.sizeBytes, right.sizeBytes);
             } else if (column === "modified") {
                 result = compareNullableNumber(left.modifiedSecs, right.modifiedSecs);
+            } else if (column === "duration") {
+                result = compareNullableNumber(left.durationSecs, right.durationSecs);
+            } else if (column === "codec") {
+                result = compareText(left.codec, right.codec);
+            } else if (column === "bitrate") {
+                result = compareNullableNumber(left.bitrate, right.bitrate);
+            } else if (column === "fps") {
+                result = compareNullableNumber(left.fps, right.fps);
+            } else if (column === "width") {
+                result = compareNullableNumber(left.mediaWidth, right.mediaWidth);
+            } else if (column === "height") {
+                result = compareNullableNumber(left.mediaHeight, right.mediaHeight);
             }
 
             if (result === 0) {
@@ -524,6 +536,12 @@ ApplicationWindow {
                 sizeBytes: controller.fileSizeBytes(row),
                 sizeStatus: controller.fileSizeStatus(row),
                 modifiedSecs: controller.fileModifiedSecs(row),
+                durationSecs: -1,
+                codec: "",
+                bitrate: -1,
+                fps: -1,
+                mediaWidth: -1,
+                mediaHeight: -1,
                 path: controller.filePath(row),
                 isDir: controller.fileIsDir(row)
             });
@@ -567,6 +585,12 @@ ApplicationWindow {
                 fileModel.setProperty(index, "sizeBytes", row.sizeBytes)
                 fileModel.setProperty(index, "sizeStatus", row.sizeStatus)
                 fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)
+                fileModel.setProperty(index, "durationSecs", row.durationSecs !== undefined ? row.durationSecs : -1)
+                fileModel.setProperty(index, "codec", row.codec !== undefined ? row.codec : "")
+                fileModel.setProperty(index, "bitrate", row.bitrate !== undefined ? row.bitrate : -1)
+                fileModel.setProperty(index, "fps", row.fps !== undefined ? row.fps : -1)
+                fileModel.setProperty(index, "mediaWidth", row.mediaWidth !== undefined ? row.mediaWidth : -1)
+                fileModel.setProperty(index, "mediaHeight", row.mediaHeight !== undefined ? row.mediaHeight : -1)
                 fileModel.setProperty(index, "path", row.path)
                 fileModel.setProperty(index, "isDir", row.isDir)
             }

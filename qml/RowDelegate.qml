@@ -12,6 +12,12 @@ Rectangle {
     required property double sizeBytes
     required property string sizeStatus
     required property double modifiedSecs
+    required property double durationSecs
+    required property string codec
+    required property double bitrate
+    required property double fps
+    required property double mediaWidth
+    required property double mediaHeight
     required property string path
     required property bool isDir
 
@@ -99,10 +105,44 @@ Rectangle {
     }
 
 
+
+    function displayDuration(seconds) {
+        if (seconds === null || seconds === undefined || Number(seconds) < 0) return ""
+        let total = Math.round(Number(seconds))
+        let hours = Math.floor(total / 3600)
+        let minutes = Math.floor((total % 3600) / 60)
+        let secs = total % 60
+        if (hours > 0) return String(hours) + ":" + String(minutes).padStart(2, "0") + ":" + String(secs).padStart(2, "0")
+        return String(minutes) + ":" + String(secs).padStart(2, "0")
+    }
+
+    function displayBitrate(bitsPerSecond) {
+        if (bitsPerSecond === null || bitsPerSecond === undefined || Number(bitsPerSecond) <= 0) return ""
+        let kiloBits = Number(bitsPerSecond) / 1000
+        if (kiloBits >= 1000) return (kiloBits / 1000).toFixed(1) + " Mbps"
+        return Math.round(kiloBits) + " kbps"
+    }
+
+    function displayDecimal(value, decimals) {
+        if (value === null || value === undefined || Number(value) <= 0) return ""
+        return Number(value).toFixed(decimals)
+    }
+
+    function displayPositiveInteger(value) {
+        if (value === null || value === undefined || Number(value) <= 0) return ""
+        return String(Math.round(Number(value)))
+    }
+
     function textForColumn(columnName) {
         if (columnName === "kind") return rowDelegate.kind
         if (columnName === "size") return rowDelegate.displaySizeFunction ? rowDelegate.displaySizeFunction(rowDelegate.sizeBytes, rowDelegate) : ""
         if (columnName === "modified") return rowDelegate.modifiedTextFunction ? rowDelegate.modifiedTextFunction(rowDelegate.modifiedSecs) : ""
+        if (columnName === "duration") return rowDelegate.displayDuration(rowDelegate.durationSecs)
+        if (columnName === "codec") return rowDelegate.codec
+        if (columnName === "bitrate") return rowDelegate.displayBitrate(rowDelegate.bitrate)
+        if (columnName === "fps") return rowDelegate.displayDecimal(rowDelegate.fps, 2)
+        if (columnName === "width") return rowDelegate.displayPositiveInteger(rowDelegate.mediaWidth)
+        if (columnName === "height") return rowDelegate.displayPositiveInteger(rowDelegate.mediaHeight)
         return ""
     }
 
@@ -112,7 +152,14 @@ Rectangle {
     }
 
     function horizontalAlignmentForColumn(columnName) {
-        return columnName === "size" ? Text.AlignRight : Text.AlignLeft
+        return columnName === "size"
+               || columnName === "duration"
+               || columnName === "bitrate"
+               || columnName === "fps"
+               || columnName === "width"
+               || columnName === "height"
+               ? Text.AlignRight
+               : Text.AlignLeft
     }
 
     function callOrEmpty(fn, arg1, arg2) {
