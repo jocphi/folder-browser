@@ -30,7 +30,8 @@ ApplicationWindow {
             ({ key: "size", label: "Size", width: 110, fillWidth: false, menuKey: "size" }),
             ({ key: "modified", label: "Modified", width: 170, fillWidth: false, menuKey: "modified" }),
             ({ key: "duration", label: "Duration", width: 100, fillWidth: false, menuKey: "duration" }),
-            ({ key: "codec", label: "Codec", width: 110, fillWidth: false, menuKey: "codec" }),
+            ({ key: "videoCodec", label: "Video codec", width: 120, fillWidth: false, menuKey: "videoCodec" }),
+            ({ key: "audioCodec", label: "Audio codec", width: 120, fillWidth: false, menuKey: "audioCodec" }),
             ({ key: "bitrate", label: "Bitrate", width: 110, fillWidth: false, menuKey: "bitrate" }),
             ({ key: "fps", label: "FPS", width: 70, fillWidth: false, menuKey: "fps" }),
             ({ key: "width", label: "Width", width: 80, fillWidth: false, menuKey: "width" }),
@@ -392,6 +393,10 @@ ApplicationWindow {
                 result = compareNullableNumber(left.durationSecs, right.durationSecs);
             } else if (column === "codec") {
                 result = compareText(left.codec, right.codec);
+            } else if (column === "videoCodec") {
+                result = compareText(left.videoCodec, right.videoCodec);
+            } else if (column === "audioCodec") {
+                result = compareText(left.audioCodec, right.audioCodec);
             } else if (column === "bitrate") {
                 result = compareNullableNumber(left.bitrate, right.bitrate);
             } else if (column === "fps") {
@@ -538,6 +543,8 @@ ApplicationWindow {
                 modifiedSecs: controller.fileModifiedSecs(row),
                 durationSecs: controller.fileDurationSecs(row),
                 codec: controller.fileCodec(row),
+                videoCodec: controller.fileVideoCodec(row),
+                audioCodec: controller.fileAudioCodec(row),
                 bitrate: controller.fileBitrate(row),
                 fps: controller.fileFps(row),
                 mediaWidth: controller.fileMediaWidth(row),
@@ -587,6 +594,8 @@ ApplicationWindow {
                 fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)
                 fileModel.setProperty(index, "durationSecs", row.durationSecs !== undefined ? row.durationSecs : -1)
                 fileModel.setProperty(index, "codec", row.codec !== undefined ? row.codec : "")
+                fileModel.setProperty(index, "videoCodec", row.videoCodec !== undefined ? row.videoCodec : "")
+                fileModel.setProperty(index, "audioCodec", row.audioCodec !== undefined ? row.audioCodec : "")
                 fileModel.setProperty(index, "bitrate", row.bitrate !== undefined ? row.bitrate : -1)
                 fileModel.setProperty(index, "fps", row.fps !== undefined ? row.fps : -1)
                 fileModel.setProperty(index, "mediaWidth", row.mediaWidth !== undefined ? row.mediaWidth : -1)
@@ -846,6 +855,9 @@ ApplicationWindow {
 
     Settings {
         id: uiSettings
+        // Persist window size. Position is deliberately left to the Wayland compositor/session-restore protocol.
+        property alias windowWidth: root.width
+        property alias windowHeight: root.height
         category: "Interface"
         property string sortColumn: "name"
         property string columnProfileName: "Default"
