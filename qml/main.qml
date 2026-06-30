@@ -530,6 +530,91 @@ ApplicationWindow {
         return secondaryTextColor;
     }
 
+
+    property var pendingTrashPaths: []
+    property string pendingTrashSummary: ""
+
+    function formatTrashSize(bytes) {
+        if (bytes === null || bytes === undefined || Number(bytes) <= 0)
+            return "0 B"
+        if (typeof displaySize === "function")
+            return displaySize(Number(bytes), ({ isDir: false, sizeStatus: "file" }))
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        let value = Number(bytes)
+        let unit = 0
+        while (value >= 1000 && unit < units.length - 1) {
+            value = value / 1000
+            unit += 1
+        }
+        return unit === 0 ? String(Math.round(value)) + " B" : value.toLocaleString(Qt.locale(), "f", 2) + " " + units[unit]
+    }
+
+    function trashCandidatePaths() {
+        let paths = []
+        if (selectedPaths && selectedPaths.length > 0) {
+            for (let i = 0; i < selectedPaths.length; i += 1)
+                paths.push(String(selectedPaths[i]))
+        } else if (fileListView.currentIndex >= 0 && fileListView.currentIndex < fileModel.count) {
+            let row = fileModel.get(fileListView.currentIndex)
+            if (!root.isParentEntry(row))
+                paths.push(String(row.path || ""))
+        }
+        let unique = []
+        let seen = ({})
+        for (let i = 0; i < paths.length; i += 1) {
+            let path = String(paths[i] || "")
+            if (path.length > 0 && !seen[path]) {
+                seen[path] = true
+                unique.push(path)
+            }
+        }
+        return unique
+    }
+
+    function accumulatedTrashSize(paths) {
+        let wanted = ({})
+        for (let i = 0; i < paths.length; i += 1)
+            wanted[String(paths[i])] = true
+        let total = 0
+        for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
+            let row = fileModel.get(rowIndex)
+            if (wanted[String(row.path || "")]) {
+                let size = Number(row.sizeBytes || 0)
+                if (size > 0)
+                    total += size
+            }
+        }
+        return total
+    }
+
+    function requestTrashSelected() {
+        let paths = trashCandidatePaths()
+        if (paths.length === 0)
+            return
+        if (paths.length === 1) {
+            selectedPaths = []
+            controller.trashPaths(paths.join("\n"))
+            return
+        }
+        pendingTrashPaths = paths
+        pendingTrashSummary = String(paths.length) + " items, " + formatTrashSize(accumulatedTrashSize(paths))
+        trashConfirmDialog.open()
+    }
+
+    function confirmTrashSelected() {
+        if (pendingTrashPaths.length > 0) {
+            selectedPaths = []
+            controller.trashPaths(pendingTrashPaths.join("\n"))
+        }
+        pendingTrashPaths = []
+        trashConfirmDialog.close()
+    }
+
+    function cancelTrashSelected() {
+        pendingTrashPaths = []
+        trashConfirmDialog.close()
+    }
+
     function openHeaderMenu(columnName, sceneX, sceneY) {
         let headerMenu = null
         if (columnName === "name") {
@@ -557,7 +642,7 @@ ApplicationWindow {
         let parent = parentPath(current)
         if (!parent || parent === current) return null
         return {
-            name: "..", kind: "folder", mimeType: "inode/directory",
+            name: "..", kind: "folder", mimeType: "inode/directory", mimeStatus: "done",
             sizeBytes: -1, sizeStatus: "unknown", modifiedSecs: -1,
             durationSecs: -1, codec: "", videoCodec: "", audioCodec: "",
             bitrate: -1, fps: -1, mediaWidth: -1, mediaHeight: -1,
@@ -577,6 +662,7 @@ ApplicationWindow {
                 name: controller.fileName(row),
                 kind: controller.fileKind(row),
                 mimeType: controller.fileMimeType(row),
+                mimeStatus: controller.fileMimeStatus(row),
                 sizeBytes: controller.fileSizeBytes(row),
                 sizeStatus: controller.fileSizeStatus(row),
                 modifiedSecs: controller.fileModifiedSecs(row),
@@ -631,6 +717,7 @@ ApplicationWindow {
                 fileModel.setProperty(index, "name", row.name)
                 fileModel.setProperty(index, "kind", row.kind)
                 fileModel.setProperty(index, "mimeType", row.mimeType !== undefined ? row.mimeType : "")
+                fileModel.setProperty(index, "mimeStatus", row.mimeStatus !== undefined ? row.mimeStatus : "done")
                 fileModel.setProperty(index, "sizeBytes", row.sizeBytes)
                 fileModel.setProperty(index, "sizeStatus", row.sizeStatus)
                 fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)
@@ -1081,6 +1168,7 @@ ApplicationWindow {
             onHeaderMenuRequested: function(columnName, sceneX, sceneY) { root.openHeaderMenu(columnName, sceneX, sceneY) }
             onOpenCurrentRequested: root.openCurrentRow()
             onGoParentRequested: root.scanPath(root.parentPath(controller.currentPath))
+            onDeleteRequested: root.requestTrashSelected()
             onEscapeToPathRequested: pathBar.forcePathFocus()
             onToggleSelectionRequested: function(rowIndex) { root.toggleSelection(rowIndex) }
             onShiftCursorRequested: function(direction) { root.handleShiftCursorSelection(direction) }
@@ -1095,6 +1183,42 @@ ApplicationWindow {
             onRowDoubleClicked: function(rowIndex) { root.openRow(fileModel.get(rowIndex)) }
         }
 
+
+        Dialog {
+            id: trashConfirmDialog
+            modal: true
+            focus: true
+            title: "Move selected items to Trash?"
+            anchors.centerIn: parent
+            standardButtons: Dialog.NoButton
+            closePolicy: Popup.CloseOnEscape
+            onOpened: forceActiveFocus()
+
+            Keys.onPressed: function(event) {
+                if (event.text === "y" || event.text === "Y") {
+                    root.confirmTrashSelected()
+                    event.accepted = true
+                } else if (event.text === "n" || event.text === "N" || event.key === Qt.Key_Escape) {
+                    root.cancelTrashSelected()
+                    event.accepted = true
+                }
+            }
+
+            ColumnLayout {
+                spacing: 12
+                Label {
+                    text: "Move " + root.pendingTrashSummary + " to Trash?"
+                    wrapMode: Text.Wrap
+                    Layout.preferredWidth: 360
+                }
+                RowLayout {
+                    Layout.alignment: Qt.AlignRight
+                    Button { text: "No"; onClicked: root.cancelTrashSelected() }
+                    Button { text: "Yes"; highlighted: true; onClicked: root.confirmTrashSelected() }
+                }
+            }
+        }
+
         StatusBar {
             Layout.fillWidth: true
             statusText: controller.statusText
@@ -1102,7 +1226,7 @@ ApplicationWindow {
             visibleCount: fileListView.count
             totalCount: allRows.length
             filterText: root.filterText
-            isScanning: root.isScanningSizes
+            isScanning: controller.isScanning || root.isScanningSizes
             scanDone: root.sizeScanDone
             scanTotal: root.sizeScanTotal
             secondaryTextColor: root.secondaryTextColor

@@ -83,6 +83,7 @@ Rectangle {
     signal keyboardMoveCurrentRequested(int direction, bool extendSelection)
     signal rowPressed(var mouse, int rowIndex)
     signal rowDoubleClicked(int rowIndex)
+    signal deleteRequested()
 
     Layout.fillWidth: true
     Layout.fillHeight: true
@@ -171,6 +172,11 @@ Rectangle {
                 event.accepted = true
             }
             Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Delete) {
+                    fileListView.deleteRequested()
+                    event.accepted = true
+                    return
+                }
                 // Route plain Up/Down through root so selection anchor follows keyboard navigation.
                 if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
                     let extendSelection = (event.modifiers & Qt.ShiftModifier) !== 0
