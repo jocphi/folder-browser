@@ -1,7 +1,7 @@
 use crate::cxxqt_object::qobject;
 use crate::file_row::FileRow;
 use cxx_qt_lib::QString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 #[derive(Clone, Debug, Default)]
@@ -137,13 +137,6 @@ pub(crate) fn apply_media_metadata(row: &mut FileRow, metadata: MediaMetadata) {
 
 pub(crate) fn mark_media_metadata_unavailable(row: &mut FileRow) {
     row.media_status = "error".to_string();
-}
-
-pub(crate) fn media_jobs(rows: &[FileRow]) -> Vec<(usize, PathBuf)> {
-    rows.iter().enumerate()
-        .filter(|(_, row)| !row.is_dir && is_media_path(&row.path))
-        .map(|(index, row)| (index, row.path.clone()))
-        .collect()
 }
 
 impl qobject::FolderBrowserController {
