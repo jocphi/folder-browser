@@ -67,6 +67,30 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "fileIsDir"]
         fn file_is_dir(&self, row: i32) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "fileDurationSecs"]
+        fn file_duration_secs(&self, row: i32) -> f64;
+
+        #[qinvokable]
+        #[cxx_name = "fileCodec"]
+        fn file_codec(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileBitrate"]
+        fn file_bitrate(&self, row: i32) -> i64;
+
+        #[qinvokable]
+        #[cxx_name = "fileFps"]
+        fn file_fps(&self, row: i32) -> f64;
+
+        #[qinvokable]
+        #[cxx_name = "fileMediaWidth"]
+        fn file_media_width(&self, row: i32) -> i32;
+
+        #[qinvokable]
+        #[cxx_name = "fileMediaHeight"]
+        fn file_media_height(&self, row: i32) -> i32;
     }
 
     impl cxx_qt::Threading for FolderBrowserController {}
@@ -80,6 +104,7 @@ use crate::file_row::FileRow;
 use crate::file_size_status::{DirectorySizeStatusUpdate, SizeStatus};
 use crate::scanner::scan_directory;
 use crate::signals::bump_update_generation;
+use crate::media_metadata::{apply_media_metadata, media_jobs, probe_media_metadata};
 use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -159,6 +184,14 @@ impl qobject::FolderBrowserController {
             return;
         }
 
+        let previous_directory_sizes: std::collections::HashMap<PathBuf, (Option<u64>, String)> = self
+            .rust()
+            .rows
+            .iter()
+            .filter(|row| row.is_dir)
+            .map(|row| (row.path.clone(), (row.size_bytes, row.size_text.clone())))
+            .collect();
+
         let rows = match scan_directory(directory, follow_symlinks) {
             Ok(rows) => rows,
             Err(error) => {
@@ -179,12 +212,20 @@ impl qobject::FolderBrowserController {
             .map(|(index, row)| (index, row.path.clone()))
             .collect();
 
+        let media_jobs = media_jobs(&rows);
+
         let mut rows = rows;
         for (row_index, _) in &directory_jobs {
             if let Some(row) = rows.get_mut(*row_index) {
-                row.size_bytes = None;
-                row.size_text.clear();
-                row.size_status = SizeStatus::Scanning;
+                if let Some((previous_size_bytes, previous_size_text)) = previous_directory_sizes.get(&row.path) {
+                    row.size_bytes = *previous_size_bytes;
+                    row.size_text = previous_size_text.clone();
+                    row.size_status = SizeStatus::Stale;
+                } else {
+                    row.size_bytes = None;
+                    row.size_text.clear();
+                    row.size_status = SizeStatus::Scanning;
+                }
             }
         }
 
@@ -208,6 +249,31 @@ impl qobject::FolderBrowserController {
         }
 
         if !directory_jobs.is_empty() {
+
+        if !media_jobs.is_empty() {
+            let media_qt_thread = qt_thread.clone();
+            std::thread::spawn(move || {
+                for (row_index, media_path) in media_jobs {
+                    let metadata = probe_media_metadata(&media_path);
+                    if metadata.is_empty() { continue; }
+                    let path_for_match = media_path.clone();
+                    let _ = media_qt_thread.queue(move |mut controller| {
+                        if controller.rust().scan_generation != generation { return; }
+                        let changed = {
+                            let rows = &mut controller.as_mut().rust_mut().rows;
+                            if let Some(row) = rows.get_mut(row_index) {
+                                if row.path == path_for_match {
+                                    apply_media_metadata(row, metadata);
+                                    true
+                                } else { false }
+                            } else { false }
+                        };
+                        if changed { bump_update_generation(controller.as_mut()); }
+                    });
+                }
+            });
+        }
+
             std::thread::spawn(move || {
                 let status_qt_thread = qt_thread.clone();
                 let mut batch = DirectorySizeBatch::new(qt_thread, generation);
@@ -249,6 +315,7 @@ impl qobject::FolderBrowserController {
                     });
 
                     batch.flush_if_needed(32, Duration::from_millis(750));
+                    std::thread::sleep(Duration::from_millis(5));
                 }
 
                 batch.flush();

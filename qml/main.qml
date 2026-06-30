@@ -536,12 +536,12 @@ ApplicationWindow {
                 sizeBytes: controller.fileSizeBytes(row),
                 sizeStatus: controller.fileSizeStatus(row),
                 modifiedSecs: controller.fileModifiedSecs(row),
-                durationSecs: -1,
-                codec: "",
-                bitrate: -1,
-                fps: -1,
-                mediaWidth: -1,
-                mediaHeight: -1,
+                durationSecs: controller.fileDurationSecs(row),
+                codec: controller.fileCodec(row),
+                bitrate: controller.fileBitrate(row),
+                fps: controller.fileFps(row),
+                mediaWidth: controller.fileMediaWidth(row),
+                mediaHeight: controller.fileMediaHeight(row),
                 path: controller.filePath(row),
                 isDir: controller.fileIsDir(row)
             });

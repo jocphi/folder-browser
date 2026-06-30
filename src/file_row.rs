@@ -10,7 +10,7 @@ pub(crate) struct FileRow {
     pub(crate) size_text: String,
     pub(crate) size_status: SizeStatus,
     pub(crate) modified_secs: Option<u64>,
-    pub(crate) path: PathBuf,
+    pub(crate) duration_secs: Option<f64>,    pub(crate) codec: String,    pub(crate) bitrate: Option<u64>,    pub(crate) fps: Option<f64>,    pub(crate) media_width: Option<u32>,    pub(crate) media_height: Option<u32>,    pub(crate) path: PathBuf,
     pub(crate) is_dir: bool,
 }
 

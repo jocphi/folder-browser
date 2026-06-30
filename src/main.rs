@@ -1,4 +1,5 @@
 pub mod formatting;
+pub mod media_metadata;
 pub mod file_size_status;
 pub mod file_size_bytes;
 pub mod file_size_text;
