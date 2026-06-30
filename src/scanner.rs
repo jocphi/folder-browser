@@ -3,7 +3,22 @@ use crate::file_size_status::SizeStatus;
 use crate::formatting::format_size;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::time::UNIX_EPOCH;
+
+
+fn detect_mime_type(path: &Path, is_dir: bool, is_symlink: bool, is_file: bool) -> String {
+    if is_dir { return "inode/directory".to_string(); }
+    if is_symlink { return "inode/symlink".to_string(); }
+    if !is_file { return "application/octet-stream".to_string(); }
+    match Command::new("xdg-mime").arg("query").arg("filetype").arg(path).output() {
+        Ok(output) if output.status.success() => {
+            let mime_type = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if mime_type.is_empty() { "application/octet-stream".to_string() } else { mime_type }
+        }
+        _ => "application/octet-stream".to_string(),
+    }
+}
 
 pub(crate) fn scan_directory(
     directory: &Path,
@@ -18,12 +33,16 @@ pub(crate) fn scan_directory(
                 rows.push(FileRow {
                     name: format!("<unreadable entry: {error}>"),
                     kind: "error".to_string(),
+                    mime_type: "application/x-unreadable".to_string(),
+                    media_status: "none".to_string(),
                     size_bytes: None,
                     size_text: String::new(),
                     size_status: SizeStatus::Error,
                     modified_secs: None,
                     duration_secs: None,
                     codec: String::new(),
+                    video_codec: String::new(),
+                    audio_codec: String::new(),
                     bitrate: None,
                     fps: None,
                     media_width: None,
@@ -69,6 +88,15 @@ pub(crate) fn scan_directory(
 
         let size_bytes = if is_file { metadata.as_ref().map(|metadata| metadata.len()) } else { None };
         let size_status = if is_dir { SizeStatus::Unknown } else { SizeStatus::File };
+        let mime_type = detect_mime_type(&path, is_dir, is_symlink, is_file);
+        let media_extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+        let media_status = if mime_type.starts_with("video/")
+            || mime_type.starts_with("audio/")
+            || matches!(media_extension.as_str(), "3g2"|"3gp"|"aac"|"aiff"|"ape"|"asf"|"avi"|"flac"|"flv"|"m2ts"|"m4a"|"m4v"|"mka"|"mkv"|"mov"|"mp3"|"mp4"|"mpeg"|"mpg"|"mts"|"ogg"|"opus"|"ts"|"wav"|"webm"|"wma"|"wmv") {
+            "scanning".to_string()
+        } else {
+            "none".to_string()
+        };
 
         let modified_secs = metadata
             .as_ref()
@@ -79,12 +107,16 @@ pub(crate) fn scan_directory(
         rows.push(FileRow {
             name,
             kind,
+            mime_type,
+            media_status,
             size_bytes,
             size_text: format_size(size_bytes),
             size_status,
             modified_secs,
             duration_secs: None,
             codec: String::new(),
+            video_codec: String::new(),
+            audio_codec: String::new(),
             bitrate: None,
             fps: None,
             media_width: None,

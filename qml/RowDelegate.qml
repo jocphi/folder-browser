@@ -21,6 +21,7 @@ Rectangle {
     required property double fps
     required property double mediaWidth
     required property double mediaHeight
+    required property string mediaStatus
     required property string path
     required property bool isDir
 
@@ -147,23 +148,55 @@ Rectangle {
         return rowDelegate.kind
     }
 
+
+    function isMediaColumn(columnName) {
+        return columnName === "duration"
+               || columnName === "codec"
+               || columnName === "videoCodec"
+               || columnName === "audioCodec"
+               || columnName === "bitrate"
+               || columnName === "fps"
+               || columnName === "width"
+               || columnName === "height"
+    }
+
+    function mediaPlaceholderText(columnName) {
+        if (!rowDelegate.isMediaColumn(columnName))
+            return ""
+        if (rowDelegate.mediaStatus === "scanning")
+            return "…"
+        if (rowDelegate.mediaStatus === "error")
+            return "—"
+        return ""
+    }
+
+    function mediaTextOrPlaceholder(columnName, valueText) {
+        let placeholder = rowDelegate.mediaPlaceholderText(columnName)
+        if (placeholder.length > 0)
+            return placeholder
+        return valueText
+    }
+
     function textForColumn(columnName) {
         if (columnName === "kind") return rowDelegate.displayTypeText()
         if (columnName === "mimeType") return rowDelegate.displayTypeText()
         if (columnName === "size") return rowDelegate.displaySizeFunction ? rowDelegate.displaySizeFunction(rowDelegate.sizeBytes, rowDelegate) : ""
         if (columnName === "modified") return rowDelegate.modifiedTextFunction ? rowDelegate.modifiedTextFunction(rowDelegate.modifiedSecs) : ""
-        if (columnName === "duration") return rowDelegate.displayDuration(rowDelegate.durationSecs)
-        if (columnName === "codec") return rowDelegate.codec
-        if (columnName === "videoCodec") return rowDelegate.videoCodec
-        if (columnName === "audioCodec") return rowDelegate.audioCodec
-        if (columnName === "bitrate") return rowDelegate.displayBitrate(rowDelegate.bitrate)
-        if (columnName === "fps") return rowDelegate.displayDecimal(rowDelegate.fps, 2)
-        if (columnName === "width") return rowDelegate.displayPositiveInteger(rowDelegate.mediaWidth)
-        if (columnName === "height") return rowDelegate.displayPositiveInteger(rowDelegate.mediaHeight)
+        if (columnName === "duration") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.displayDuration(rowDelegate.durationSecs))
+        if (columnName === "codec") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.codec)
+        if (columnName === "videoCodec") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.videoCodec)
+        if (columnName === "audioCodec") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.audioCodec)
+        if (columnName === "bitrate") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.displayBitrate(rowDelegate.bitrate))
+        if (columnName === "fps") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.displayDecimal(rowDelegate.fps, 2))
+        if (columnName === "width") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.displayPositiveInteger(rowDelegate.mediaWidth))
+        if (columnName === "height") return rowDelegate.mediaTextOrPlaceholder(columnName, rowDelegate.displayPositiveInteger(rowDelegate.mediaHeight))
         return ""
     }
 
     function textColorForColumn(columnName) {
+        if (rowDelegate.isMediaColumn(columnName)) {
+            return rowDelegate.mediaPlaceholderText(columnName).length > 0 ? rowDelegate.secondaryTextColor : rowDelegate.fileTextColor
+        }
         if (columnName === "size") return rowDelegate.sizeColorFunction ? rowDelegate.sizeColorFunction(rowDelegate) : rowDelegate.secondaryTextColor
         return rowDelegate.secondaryTextColor
     }

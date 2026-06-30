@@ -45,6 +45,10 @@ pub mod qobject {
         fn file_kind(&self, row: i32) -> QString;
 
         #[qinvokable]
+        #[cxx_name = "fileMimeType"]
+        fn file_mime_type(&self, row: i32) -> QString;
+
+        #[qinvokable]
         #[cxx_name = "fileSizeBytes"]
         fn file_size_bytes(&self, row: i32) -> i64;
 
@@ -77,6 +81,14 @@ pub mod qobject {
         fn file_codec(&self, row: i32) -> QString;
 
         #[qinvokable]
+        #[cxx_name = "fileVideoCodec"]
+        fn file_video_codec(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileAudioCodec"]
+        fn file_audio_codec(&self, row: i32) -> QString;
+
+        #[qinvokable]
         #[cxx_name = "fileBitrate"]
         fn file_bitrate(&self, row: i32) -> i64;
 
@@ -91,6 +103,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "fileMediaHeight"]
         fn file_media_height(&self, row: i32) -> i32;
+
+        #[qinvokable]
+        #[cxx_name = "fileMediaStatus"]
+        fn file_media_status(&self, row: i32) -> QString;
     }
 
     impl cxx_qt::Threading for FolderBrowserController {}
@@ -104,7 +120,7 @@ use crate::file_row::FileRow;
 use crate::file_size_status::{DirectorySizeStatusUpdate, SizeStatus};
 use crate::scanner::scan_directory;
 use crate::signals::bump_update_generation;
-use crate::media_metadata::{apply_media_metadata, media_jobs, probe_media_metadata};
+use crate::media_metadata::{apply_media_metadata, mark_media_metadata_unavailable, media_jobs, probe_media_metadata};
 use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -254,7 +270,7 @@ impl qobject::FolderBrowserController {
             std::thread::spawn(move || {
                 for (row_index, media_path) in media_jobs {
                     let metadata = probe_media_metadata(&media_path);
-                    if metadata.is_empty() { continue; }
+                    let metadata_is_empty = metadata.is_empty();
                     let path_for_match = media_path.clone();
                     let _ = media_qt_thread.queue(move |mut controller| {
                         if controller.rust().scan_generation != generation { return; }
@@ -262,7 +278,11 @@ impl qobject::FolderBrowserController {
                             let rows = &mut controller.as_mut().rust_mut().rows;
                             if let Some(row) = rows.get_mut(row_index) {
                                 if row.path == path_for_match {
-                                    apply_media_metadata(row, metadata);
+                                    if metadata_is_empty {
+                                        mark_media_metadata_unavailable(row);
+                                    } else {
+                                        apply_media_metadata(row, metadata);
+                                    }
                                     true
                                 } else { false }
                             } else { false }

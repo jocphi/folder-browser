@@ -561,6 +561,7 @@ ApplicationWindow {
             sizeBytes: -1, sizeStatus: "unknown", modifiedSecs: -1,
             durationSecs: -1, codec: "", videoCodec: "", audioCodec: "",
             bitrate: -1, fps: -1, mediaWidth: -1, mediaHeight: -1,
+            mediaStatus: "none",
             path: parent, isDir: true, isParentEntry: true
         }
     }
@@ -587,6 +588,7 @@ ApplicationWindow {
                 fps: controller.fileFps(row),
                 mediaWidth: controller.fileMediaWidth(row),
                 mediaHeight: controller.fileMediaHeight(row),
+                mediaStatus: controller.fileMediaStatus(row),
                 path: controller.filePath(row),
                 isDir: controller.fileIsDir(row),
                 isParentEntry: false
@@ -640,6 +642,7 @@ ApplicationWindow {
                 fileModel.setProperty(index, "fps", row.fps !== undefined ? row.fps : -1)
                 fileModel.setProperty(index, "mediaWidth", row.mediaWidth !== undefined ? row.mediaWidth : -1)
                 fileModel.setProperty(index, "mediaHeight", row.mediaHeight !== undefined ? row.mediaHeight : -1)
+                fileModel.setProperty(index, "mediaStatus", row.mediaStatus !== undefined ? row.mediaStatus : "none")
                 fileModel.setProperty(index, "path", row.path)
                 fileModel.setProperty(index, "isDir", row.isDir)
             }

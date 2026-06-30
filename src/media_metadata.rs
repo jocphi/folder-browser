@@ -132,6 +132,11 @@ pub(crate) fn apply_media_metadata(row: &mut FileRow, metadata: MediaMetadata) {
     row.fps = metadata.fps;
     row.media_width = metadata.media_width;
     row.media_height = metadata.media_height;
+    row.media_status = "done".to_string();
+}
+
+pub(crate) fn mark_media_metadata_unavailable(row: &mut FileRow) {
+    row.media_status = "error".to_string();
 }
 
 pub(crate) fn media_jobs(rows: &[FileRow]) -> Vec<(usize, PathBuf)> {
@@ -150,4 +155,5 @@ impl qobject::FolderBrowserController {
     pub fn file_fps(&self, row: i32) -> f64 { self.row(row).and_then(|r| r.fps).unwrap_or(-1.0) }
     pub fn file_media_width(&self, row: i32) -> i32 { self.row(row).and_then(|r| r.media_width).map(|v| v.min(i32::MAX as u32) as i32).unwrap_or(-1) }
     pub fn file_media_height(&self, row: i32) -> i32 { self.row(row).and_then(|r| r.media_height).map(|v| v.min(i32::MAX as u32) as i32).unwrap_or(-1) }
+    pub fn file_media_status(&self, row: i32) -> QString { self.row(row).map(|r| QString::from(r.media_status.clone())).unwrap_or_default() }
 }
