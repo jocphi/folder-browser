@@ -16,6 +16,27 @@ ApplicationWindow {
 
     property var allRows: []
     property string sortColumn: "name"
+    property string activeColumnProfileName: "Default"
+    property var columnProfiles: ({
+        "Default": [
+            ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
+            ({ key: "kind", label: "Type", width: 90, fillWidth: false, menuKey: "kind" }),
+            ({ key: "size", label: "Size", width: 100, fillWidth: false, menuKey: "size" }),
+            ({ key: "modified", label: "Modified", width: 210, fillWidth: false, menuKey: "modified" })
+        ],
+        "Media": [
+            ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
+            ({ key: "kind", label: "Type", width: 120, fillWidth: false, menuKey: "kind" }),
+            ({ key: "size", label: "Size", width: 110, fillWidth: false, menuKey: "size" }),
+            ({ key: "modified", label: "Modified", width: 170, fillWidth: false, menuKey: "modified" }),
+            ({ key: "duration", label: "Duration", width: 100, fillWidth: false, menuKey: "duration" }),
+            ({ key: "codec", label: "Codec", width: 110, fillWidth: false, menuKey: "codec" }),
+            ({ key: "bitrate", label: "Bitrate", width: 110, fillWidth: false, menuKey: "bitrate" }),
+            ({ key: "fps", label: "FPS", width: 70, fillWidth: false, menuKey: "fps" }),
+            ({ key: "width", label: "Width", width: 80, fillWidth: false, menuKey: "width" }),
+            ({ key: "height", label: "Height", width: 80, fillWidth: false, menuKey: "height" })
+        ]
+    })
     property bool sortAscending: true
     property bool showHidden: false
     property bool followSymlinks: false
@@ -46,6 +67,9 @@ ApplicationWindow {
     property color rowEvenColor: "#1f2937"
     property color rowOddColor: "#20242b"
     property color selectedRowColor: "#7f1d1d"
+    property color rangeAnchorMarkerColor: "#fbbf24"
+    property string rangeAnchorMarkerMode: "lighter"
+    property real rangeAnchorMarkerPercent: 10
     property color keyboardCurrentRowColor: "#14532d"
     property color activeSortHeaderColor: "#374151"
     property color activeSortColumnColor: "#2b3544"
@@ -72,6 +96,7 @@ ApplicationWindow {
         ({ key: "rowEvenColor", label: "Row", defaultValue: "#1f2937" }),
         ({ key: "rowOddColor", label: "Odd row", defaultValue: "#20242b" }),
         ({ key: "selectedRowColor", label: "Selected row", defaultValue: "#7f1d1d" }),
+        ({ key: "rangeAnchorMarkerColor", label: "Range anchor marker", defaultValue: "#fbbf24" }),
         ({ key: "keyboardCurrentRowColor", label: "Current row", defaultValue: "#14532d" }),
         ({ key: "activeSortHeaderColor", label: "Sorted header", defaultValue: "#374151" }),
         ({ key: "activeSortColumnColor", label: "Sorted column", defaultValue: "#2b3544" }),
@@ -92,6 +117,7 @@ ApplicationWindow {
 
     function loadInterfaceSettings() {
         sortColumn = uiSettings.sortColumn || "name"
+        activeColumnProfileName = columnProfiles[uiSettings.columnProfileName] ? uiSettings.columnProfileName : "Default"
         sortAscending = uiSettings.sortAscending
         showHidden = uiSettings.showHidden
         followSymlinks = uiSettings.followSymlinks
@@ -112,6 +138,8 @@ ApplicationWindow {
             let definition = colorDefinitions[index]
             root[definition.key] = colorSettings[definition.key] || definition.defaultValue
         }
+        root.rangeAnchorMarkerMode = colorSettings.rangeAnchorMarkerMode || "lighter"
+        root.rangeAnchorMarkerPercent = Number(colorSettings.rangeAnchorMarkerPercent || 10)
     }
 
     function applyColorSettings() {
@@ -119,6 +147,8 @@ ApplicationWindow {
             let key = colorDefinitions[index].key
             colorSettings[key] = String(root[key])
         }
+        colorSettings.rangeAnchorMarkerMode = String(root.rangeAnchorMarkerMode)
+        colorSettings.rangeAnchorMarkerPercent = Number(root.rangeAnchorMarkerPercent)
     }
 
     function resetColorSetting(key) {
@@ -297,6 +327,33 @@ ApplicationWindow {
             sensitivity: "base",
             numeric: true
         });
+    }
+
+    function columnProfileNames() {
+        return Object.keys(columnProfiles).sort()
+    }
+
+    function activeColumnProfileColumns() {
+        let columns = columnProfiles[activeColumnProfileName]
+        if (!columns) {
+            return columnProfiles["Default"]
+        }
+        return columns
+    }
+
+    function setColumnProfileName(profileName) {
+        if (!columnProfiles[profileName]) {
+            profileName = "Default"
+        }
+
+        if (activeColumnProfileName === profileName) {
+            fileListView.forceListFocus()
+            return
+        }
+
+        activeColumnProfileName = profileName
+        uiSettings.columnProfileName = activeColumnProfileName
+        fileListView.forceListFocus()
     }
 
     function compareNullableNumber(left, right) {
@@ -550,7 +607,7 @@ ApplicationWindow {
             selectedPaths = paths
             lastSelectedIndex = anchor
         } else {
-            lastSelectedIndex = -1
+            selectOnlyIndexForPlainNavigation(newIndex)
         }
 
         fileListView.currentIndex = newIndex
@@ -610,12 +667,73 @@ ApplicationWindow {
         return fileModel.get(index).path;
     }
 
+    function selectOnlyIndexForPlainNavigation(index) {
+        if (index < 0 || index >= fileModel.count) {
+            selectedPaths = []
+            lastSelectedIndex = -1
+            return
+        }
+
+        let path = rowPathAt(index)
+        selectedPaths = path.length > 0 ? [path] : []
+        lastSelectedIndex = index
+    }
+
+        function keyboardMoveCurrent(direction, extendSelection) {
+        if (fileModel.count <= 0) {
+            fileListView.currentIndex = -1
+            selectedPaths = []
+            lastSelectedIndex = -1
+            return
+        }
+
+        let oldIndex = fileListView.currentIndex >= 0 ? fileListView.currentIndex : 0
+        let newIndex = Math.max(0, Math.min(oldIndex + direction, fileModel.count - 1))
+
+        if (extendSelection) {
+            let anchor = lastSelectedIndex >= 0 ? lastSelectedIndex : oldIndex
+            anchor = Math.max(0, Math.min(anchor, fileModel.count - 1))
+
+            let fromIndex = Math.min(anchor, newIndex)
+            let toIndex = Math.max(anchor, newIndex)
+            let paths = []
+
+            for (let index = fromIndex; index <= toIndex; index += 1) {
+                let path = rowPathAt(index)
+                if (path.length > 0) {
+                    paths.push(path)
+                }
+            }
+
+            selectedPaths = paths
+            lastSelectedIndex = anchor
+        } else {
+            selectOnlyIndexForPlainNavigation(newIndex)
+        }
+
+        fileListView.currentIndex = newIndex
+        fileListView.containIndex(newIndex)
+        fileListView.forceListFocus()
+    }
+
     function isPathSelected(pathText) {
         return selectedPaths.indexOf(pathText) >= 0;
     }
 
     function isRowSelected(index) {
         return isPathSelected(rowPathAt(index));
+    }
+
+        function isRangeAnchorRow(index) {
+        if (index < 0 || index >= fileModel.count || selectedPaths.length <= 0) {
+            return false
+        }
+
+        let row = fileModel.get(index)
+        let pathText = String(row.path || "")
+
+        // The first selected path is the range pivot/anchor used for range selections.
+        return pathText.length > 0 && pathText === String(selectedPaths[0] || "")
     }
 
     function setSingleSelection(index) {
@@ -704,6 +822,7 @@ ApplicationWindow {
         id: uiSettings
         category: "Interface"
         property string sortColumn: "name"
+        property string columnProfileName: "Default"
         property bool sortAscending: true
         property bool showHidden: false
         property bool followSymlinks: false
@@ -796,11 +915,49 @@ ApplicationWindow {
             }
         }
 
+        RowLayout {
+            id: columnProfileBar
+            Layout.fillWidth: true
+            spacing: 8
+
+            Label {
+                text: "Column profile"
+                color: root.secondaryTextColor
+                font.family: root.rowFontFamily
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            ComboBox {
+                id: columnProfileComboBox
+                model: root.columnProfileNames()
+                currentIndex: Math.max(0, root.columnProfileNames().indexOf(root.activeColumnProfileName))
+                Layout.preferredWidth: 160
+                onActivated: function(index) {
+                    let names = root.columnProfileNames()
+                    if (index >= 0 && index < names.length) {
+                        root.setColumnProfileName(names[index])
+                    }
+                }
+            }
+
+            Label {
+                text: root.activeColumnProfileName === "Default"
+                      ? "Current columns"
+                      : "Profile scaffold; metadata columns will be enabled in later patches"
+                color: root.secondaryTextColor
+                font.family: root.rowFontFamily
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+        }
+
         FileListView {
             id: fileListView
             fileModel: fileModel
             sortColumn: root.sortColumn
             sortAscending: root.sortAscending
+            columnProfileName: root.activeColumnProfileName
+            columnProfileColumns: root.activeColumnProfileColumns()
             rowHeight: root.rowHeight
             fileIconSize: root.fileIconSize
             rowFontFamily: root.rowFontFamily
@@ -812,6 +969,9 @@ ApplicationWindow {
             rowEvenColor: root.rowEvenColor
             rowOddColor: root.rowOddColor
             selectedRowColor: root.selectedRowColor
+            rangeAnchorMarkerColor: root.rangeAnchorMarkerColor
+            rangeAnchorMarkerMode: root.rangeAnchorMarkerMode
+            rangeAnchorMarkerPercent: root.rangeAnchorMarkerPercent
             keyboardCurrentRowColor: root.keyboardCurrentRowColor
             activeSortHeaderColor: root.activeSortHeaderColor
             activeSortColumnColor: root.activeSortColumnColor
@@ -829,6 +989,7 @@ ApplicationWindow {
             sizeHeaderMenu: root.sizeHeaderMenu
             modifiedHeaderMenu: root.modifiedHeaderMenu
             isRowSelectedFunction: root.isRowSelected
+            isRangeAnchorFunction: root.isRangeAnchorRow
             fileIconNameFunction: root.fileIconName
             uriListFromPathFunction: root.uriListFromPath
             highlightedFileNameFunction: root.highlightedFileName
@@ -842,6 +1003,11 @@ ApplicationWindow {
             onEscapeToPathRequested: pathBar.forcePathFocus()
             onToggleSelectionRequested: function(rowIndex) { root.toggleSelection(rowIndex) }
             onShiftCursorRequested: function(direction) { root.handleShiftCursorSelection(direction) }
+
+            onKeyboardMoveCurrentRequested: function(direction, extendSelection) {
+                root.keyboardMoveCurrent(direction, extendSelection)
+            }
+
             onPageMoveRequested: function(direction, extendSelection) { root.pageMoveCurrent(direction, extendSelection) }
             onBoundaryMoveRequested: function(direction, extendSelection) { root.boundaryMoveCurrent(direction, extendSelection) }
             onRowPressed: function(mouse, rowIndex) { root.handleRowPress(mouse, rowIndex) }

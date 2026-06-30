@@ -8,6 +8,8 @@ Rectangle {
     property var fileModel
 
     property string sortColumn: "name"
+    property string columnProfileName: "Default"
+    property var columnProfileColumns: []
     property bool sortAscending: true
     property int rowHeight: 32
     property int fileIconSize: rowHeight
@@ -23,6 +25,9 @@ Rectangle {
     property color rowEvenColor: "#1f2937"
     property color rowOddColor: "#20242b"
     property color selectedRowColor: "#7f1d1d"
+    property color rangeAnchorMarkerColor: "#fbbf24"
+    property string rangeAnchorMarkerMode: "lighter"
+    property real rangeAnchorMarkerPercent: 10
     property color keyboardCurrentRowColor: "#14532d"
     property color activeSortHeaderColor: "#374151"
     property color activeSortColumnColor: "#2b3544"
@@ -43,6 +48,7 @@ Rectangle {
     property var modifiedHeaderMenu
 
     property var isRowSelectedFunction
+    property var isRangeAnchorFunction
     property var fileIconNameFunction
     property var uriListFromPathFunction
     property var highlightedFileNameFunction
@@ -59,6 +65,7 @@ Rectangle {
     signal shiftCursorRequested(int direction)
     signal pageMoveRequested(int direction, bool extendSelection)
     signal boundaryMoveRequested(int direction, bool extendSelection)
+    signal keyboardMoveCurrentRequested(int direction, bool extendSelection)
     signal rowPressed(var mouse, int rowIndex)
     signal rowDoubleClicked(int rowIndex)
 
@@ -187,6 +194,14 @@ Rectangle {
                 event.accepted = true
             }
             Keys.onPressed: function(event) {
+                // Route plain Up/Down through root so selection anchor follows keyboard navigation.
+                if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
+                    let extendSelection = (event.modifiers & Qt.ShiftModifier) !== 0
+                    fileListView.keyboardMoveCurrentRequested(event.key === Qt.Key_Down ? 1 : -1, extendSelection)
+                    event.accepted = true
+                    return
+                }
+
 
             if (event.key === Qt.Key_PageDown) {
                 fileListView.pageMoveRequested(1, event.modifiers & Qt.ShiftModifier)
@@ -244,6 +259,7 @@ Rectangle {
                 listWidth: fileList.width
                 current: fileList.currentIndex === index
                 selected: fileListView.isRowSelectedFunction ? fileListView.isRowSelectedFunction(index) : false
+                rangeAnchor: fileListView.isRangeAnchorFunction ? fileListView.isRangeAnchorFunction(index) : false
                 rowHeight: fileListView.rowHeight
                 fileIconSize: fileListView.fileIconSize
                 rowFontFamily: fileListView.rowFontFamily
@@ -251,6 +267,9 @@ Rectangle {
                 rowEvenColor: fileListView.rowEvenColor
                 rowOddColor: fileListView.rowOddColor
                 selectedRowColor: fileListView.selectedRowColor
+                rangeAnchorMarkerColor: fileListView.rangeAnchorMarkerColor
+                rangeAnchorMarkerMode: fileListView.rangeAnchorMarkerMode
+                rangeAnchorMarkerPercent: fileListView.rangeAnchorMarkerPercent
                 keyboardCurrentRowColor: fileListView.keyboardCurrentRowColor
                 activeSortColumnColor: fileListView.activeSortColumnColor
                 activeSortColumnSelectedColor: fileListView.activeSortColumnSelectedColor
