@@ -20,6 +20,12 @@ Rectangle {
     property int fileIconSize: rowHeight
     property string rowFontFamily: "monospace"
     property string sortColumn: "name"
+    property var columnProfileColumns: [
+        ({ key: "name", label: "Name", width: -1, fillWidth: true }),
+        ({ key: "kind", label: "Type", width: 90, fillWidth: false }),
+        ({ key: "size", label: "Size", width: 100, fillWidth: false }),
+        ({ key: "modified", label: "Modified", width: 210, fillWidth: false })
+    ]
     property bool selected: false
     property bool current: false
     property bool rangeAnchor: false
@@ -92,6 +98,23 @@ Rectangle {
         return Qt.lighter(baseColor, factor)
     }
 
+
+    function textForColumn(columnName) {
+        if (columnName === "kind") return rowDelegate.kind
+        if (columnName === "size") return rowDelegate.displaySizeFunction ? rowDelegate.displaySizeFunction(rowDelegate.sizeBytes, rowDelegate) : ""
+        if (columnName === "modified") return rowDelegate.modifiedTextFunction ? rowDelegate.modifiedTextFunction(rowDelegate.modifiedSecs) : ""
+        return ""
+    }
+
+    function textColorForColumn(columnName) {
+        if (columnName === "size") return rowDelegate.sizeColorFunction ? rowDelegate.sizeColorFunction(rowDelegate) : rowDelegate.secondaryTextColor
+        return rowDelegate.secondaryTextColor
+    }
+
+    function horizontalAlignmentForColumn(columnName) {
+        return columnName === "size" ? Text.AlignRight : Text.AlignLeft
+    }
+
     function callOrEmpty(fn, arg1, arg2) {
         if (fn) {
             return fn(arg1, arg2)
@@ -137,16 +160,8 @@ Rectangle {
         anchors.rightMargin: 8
         spacing: 10
 
-        Cell {
-            columnName: "name"
-            sortColumn: rowDelegate.sortColumn
-            selected: rowDelegate.selected
-            current: rowDelegate.current
-            rangeAnchor: rowDelegate.rangeAnchor
-            activeSortColumnColor: rowDelegate.activeSortColumnColor
-            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
-            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
-            Layout.fillWidth: true
+        Component {
+            id: nameColumnComponent
 
             RowLayout {
                 anchors.fill: parent
@@ -171,66 +186,48 @@ Rectangle {
             }
         }
 
-        Cell {
-            columnName: "kind"
-            sortColumn: rowDelegate.sortColumn
-            selected: rowDelegate.selected
-            current: rowDelegate.current
-            rangeAnchor: rowDelegate.rangeAnchor
-            activeSortColumnColor: rowDelegate.activeSortColumnColor
-            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
-            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
-            Layout.preferredWidth: 90
+        Component {
+            id: textColumnComponent
 
             Label {
+                property string profileColumnName: ""
                 anchors.fill: parent
                 verticalAlignment: Text.AlignVCenter
-                text: rowDelegate.kind
-                color: rowDelegate.secondaryTextColor
+                horizontalAlignment: rowDelegate.horizontalAlignmentForColumn(profileColumnName)
+                text: rowDelegate.textForColumn(profileColumnName)
+                color: rowDelegate.textColorForColumn(profileColumnName)
                 elide: Text.ElideRight
                 font.family: rowDelegate.rowFontFamily
             }
         }
 
-        Cell {
-            columnName: "size"
-            sortColumn: rowDelegate.sortColumn
-            selected: rowDelegate.selected
-            current: rowDelegate.current
-            rangeAnchor: rowDelegate.rangeAnchor
-            activeSortColumnColor: rowDelegate.activeSortColumnColor
-            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
-            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
-            Layout.preferredWidth: 100
+        Repeater {
+            model: rowDelegate.columnProfileColumns
 
-            Label {
-                anchors.fill: parent
-                verticalAlignment: Text.AlignVCenter
-                horizontalAlignment: Text.AlignRight
-                text: rowDelegate.displaySizeFunction ? rowDelegate.displaySizeFunction(rowDelegate.sizeBytes, rowDelegate) : ""
-                color: rowDelegate.sizeColorFunction ? rowDelegate.sizeColorFunction(rowDelegate) : rowDelegate.secondaryTextColor
-                font.family: rowDelegate.rowFontFamily
-            }
-        }
+            Cell {
+                required property var modelData
+                property string profileColumnName: String(modelData.key || "")
 
-        Cell {
-            columnName: "modified"
-            sortColumn: rowDelegate.sortColumn
-            selected: rowDelegate.selected
-            current: rowDelegate.current
-            rangeAnchor: rowDelegate.rangeAnchor
-            activeSortColumnColor: rowDelegate.activeSortColumnColor
-            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
-            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
-            Layout.preferredWidth: 210
+                columnName: profileColumnName
+                sortColumn: rowDelegate.sortColumn
+                selected: rowDelegate.selected
+                current: rowDelegate.current
+                rangeAnchor: rowDelegate.rangeAnchor
+                activeSortColumnColor: rowDelegate.activeSortColumnColor
+                activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
+                activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
+                Layout.fillWidth: Boolean(modelData.fillWidth)
+                Layout.preferredWidth: Number(modelData.width || 0) > 0 ? Number(modelData.width) : -1
 
-            Label {
-                anchors.fill: parent
-                verticalAlignment: Text.AlignVCenter
-                text: rowDelegate.modifiedTextFunction ? rowDelegate.modifiedTextFunction(rowDelegate.modifiedSecs) : ""
-                color: rowDelegate.secondaryTextColor
-                elide: Text.ElideRight
-                font.family: rowDelegate.rowFontFamily
+                Loader {
+                    anchors.fill: parent
+                    sourceComponent: profileColumnName === "name" ? nameColumnComponent : textColumnComponent
+                    onLoaded: {
+                        if (item && item.profileColumnName !== undefined) {
+                            item.profileColumnName = profileColumnName
+                        }
+                    }
+                }
             }
         }
     }
@@ -238,19 +235,38 @@ Rectangle {
     MouseArea {
         id: rowMouseArea
         anchors.fill: parent
-        acceptedButtons: Qt.LeftButton
+        z: 3
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        hoverEnabled: true
         drag.target: dragProxy
-        drag.axis: Drag.XAndYAxis
         drag.threshold: 8
+        preventStealing: false
+        propagateComposedEvents: false
+
         onPressed: function(mouse) {
             rowDelegate.rowPressed(mouse, rowDelegate.index)
+            dragProxy.x = 0
+            dragProxy.y = 0
         }
-        onClicked: function(mouse) {}
-        onDoubleClicked: rowDelegate.rowDoubleClicked(rowDelegate.index)
+
+        onDoubleClicked: function(mouse) {
+            if (mouse.button === Qt.LeftButton) {
+                rowDelegate.rowDoubleClicked(rowDelegate.index)
+            }
+        }
+
+        onPositionChanged: function(mouse) {
+            if (drag.active) {
+                dragProxy.x = mouse.x
+                dragProxy.y = mouse.y
+            }
+        }
+
         onReleased: {
             dragProxy.x = 0
             dragProxy.y = 0
         }
+
         onCanceled: {
             dragProxy.x = 0
             dragProxy.y = 0

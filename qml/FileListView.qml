@@ -10,6 +10,13 @@ Rectangle {
     property string sortColumn: "name"
     property string columnProfileName: "Default"
     property var columnProfileColumns: []
+    property var defaultColumnProfileColumns: [
+        ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
+        ({ key: "kind", label: "Type", width: 90, fillWidth: false, menuKey: "kind" }),
+        ({ key: "size", label: "Size", width: 100, fillWidth: false, menuKey: "size" }),
+        ({ key: "modified", label: "Modified", width: 210, fillWidth: false, menuKey: "modified" })
+    ]
+    readonly property var effectiveColumnProfileColumns: columnProfileColumns && columnProfileColumns.length > 0 ? columnProfileColumns : defaultColumnProfileColumns
     property bool sortAscending: true
     property int rowHeight: 32
     property int fileIconSize: rowHeight
@@ -58,6 +65,14 @@ Rectangle {
 
     signal sortRequested(string columnName)
     signal headerMenuRequested(string columnName, real sceneX, real sceneY)
+
+    function headerMenuForColumn(columnName) {
+        if (columnName === "name") return nameHeaderMenu
+        if (columnName === "kind") return typeHeaderMenu
+        if (columnName === "size") return sizeHeaderMenu
+        if (columnName === "modified") return modifiedHeaderMenu
+        return null
+    }
     signal openCurrentRequested()
     signal goParentRequested()
     signal escapeToPathRequested()
@@ -110,64 +125,26 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 10
 
-                HeaderCell {
-                    title: "Name"
-                    columnName: "name"
-                    Layout.fillWidth: true
-                    menu: fileListView.nameHeaderMenu
-                    sortColumn: fileListView.sortColumn
-                    sortAscending: fileListView.sortAscending
-                    rowFontFamily: fileListView.rowFontFamily
-                    activeSortHeaderColor: fileListView.activeSortHeaderColor
-                    activeSortBorderColor: fileListView.activeSortBorderColor
-                    headerTextColor: fileListView.headerTextColor
-                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
-                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
-                }
+                Repeater {
+                    model: fileListView.effectiveColumnProfileColumns
 
-                HeaderCell {
-                    title: "Type"
-                    columnName: "kind"
-                    Layout.preferredWidth: 90
-                    menu: fileListView.typeHeaderMenu
-                    sortColumn: fileListView.sortColumn
-                    sortAscending: fileListView.sortAscending
-                    rowFontFamily: fileListView.rowFontFamily
-                    activeSortHeaderColor: fileListView.activeSortHeaderColor
-                    activeSortBorderColor: fileListView.activeSortBorderColor
-                    headerTextColor: fileListView.headerTextColor
-                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
-                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
-                }
+                    HeaderCell {
+                        required property var modelData
 
-                HeaderCell {
-                    title: "Size"
-                    columnName: "size"
-                    Layout.preferredWidth: 100
-                    menu: fileListView.sizeHeaderMenu
-                    sortColumn: fileListView.sortColumn
-                    sortAscending: fileListView.sortAscending
-                    rowFontFamily: fileListView.rowFontFamily
-                    activeSortHeaderColor: fileListView.activeSortHeaderColor
-                    activeSortBorderColor: fileListView.activeSortBorderColor
-                    headerTextColor: fileListView.headerTextColor
-                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
-                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
-                }
-
-                HeaderCell {
-                    title: "Modified"
-                    columnName: "modified"
-                    Layout.preferredWidth: 210
-                    menu: fileListView.modifiedHeaderMenu
-                    sortColumn: fileListView.sortColumn
-                    sortAscending: fileListView.sortAscending
-                    rowFontFamily: fileListView.rowFontFamily
-                    activeSortHeaderColor: fileListView.activeSortHeaderColor
-                    activeSortBorderColor: fileListView.activeSortBorderColor
-                    headerTextColor: fileListView.headerTextColor
-                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
-                    onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
+                        title: String(modelData.label || modelData.key || "")
+                        columnName: String(modelData.key || "")
+                        Layout.fillWidth: Boolean(modelData.fillWidth)
+                        Layout.preferredWidth: Number(modelData.width || 0) > 0 ? Number(modelData.width) : -1
+                        menu: fileListView.headerMenuForColumn(columnName)
+                        sortColumn: fileListView.sortColumn
+                        sortAscending: fileListView.sortAscending
+                        rowFontFamily: fileListView.rowFontFamily
+                        activeSortHeaderColor: fileListView.activeSortHeaderColor
+                        activeSortBorderColor: fileListView.activeSortBorderColor
+                        headerTextColor: fileListView.headerTextColor
+                        onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                        onMenuRequested: function(columnName, sceneX, sceneY) { fileListView.headerMenuRequested(columnName, sceneX, sceneY) }
+                    }
                 }
             }
         }
@@ -264,6 +241,7 @@ Rectangle {
                 fileIconSize: fileListView.fileIconSize
                 rowFontFamily: fileListView.rowFontFamily
                 sortColumn: fileListView.sortColumn
+                columnProfileColumns: fileListView.effectiveColumnProfileColumns
                 rowEvenColor: fileListView.rowEvenColor
                 rowOddColor: fileListView.rowOddColor
                 selectedRowColor: fileListView.selectedRowColor

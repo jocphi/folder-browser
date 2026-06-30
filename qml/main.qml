@@ -506,6 +506,8 @@ ApplicationWindow {
             headerMenu = modifiedHeaderMenu
         }
         if (!headerMenu) {
+            // Column profile scaffold columns do not have header menus yet.
+            fileListView.forceListFocus()
             return
         }
         headerMenu.x = Math.round(sceneX)
