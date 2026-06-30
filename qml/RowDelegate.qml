@@ -34,6 +34,22 @@ Rectangle {
     property color fileTextColor: "#e5e7eb"
     property color secondaryTextColor: "#d1d5db"
 
+    function tintedRowColor(baseColor) {
+        return index % 2 === 0 ? baseColor : Qt.darker(baseColor, 1.10)
+    }
+
+    function rowVisualColor() {
+        if (current) {
+            return tintedRowColor(keyboardCurrentRowColor)
+        }
+
+        if (selected) {
+            return tintedRowColor(selectedRowColor)
+        }
+
+        return tintedRowColor(rowEvenColor)
+    }
+
     property var fileIconNameFunction
     property var uriListFromPathFunction
     property var highlightedFileNameFunction
@@ -47,11 +63,7 @@ Rectangle {
     width: listWidth
     height: rowHeight
     radius: 4
-    color: selected && current
-           ? keyboardCurrentRowColor
-           : (selected
-              ? selectedRowColor
-              : (current ? keyboardCurrentRowColor : (index % 2 === 0 ? rowEvenColor : rowOddColor)))
+    color: rowVisualColor()
 
     function callOrEmpty(fn, arg1, arg2) {
         if (fn) {
@@ -205,12 +217,26 @@ Rectangle {
         property color activeSortColumnSelectedColor: "#991b1b"
         property color activeSortColumnCurrentColor: "#2A894D"
 
+        function tintedCellColor(baseColor) {
+            return rowDelegate.index % 2 === 0 ? baseColor : Qt.darker(baseColor, 1.10)
+        }
+
+        function activeSortColumnVisualColor() {
+            if (current) {
+                return tintedCellColor(activeSortColumnCurrentColor)
+            }
+
+            if (selected) {
+                return tintedCellColor(activeSortColumnSelectedColor)
+            }
+
+            return tintedCellColor(activeSortColumnColor)
+        }
+
         Layout.fillHeight: true
         radius: 3
         color: sortColumn === columnName
-               ? (selected
-                  ? activeSortColumnSelectedColor
-                  : (current ? activeSortColumnCurrentColor : activeSortColumnColor))
+               ? activeSortColumnVisualColor()
                : "transparent"
     }
 }
