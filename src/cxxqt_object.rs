@@ -248,8 +248,7 @@ impl qobject::FolderBrowserController {
             )));
         }
 
-        if !directory_jobs.is_empty() {
-
+        // Media metadata scanning is independent of directory-size scanning.
         if !media_jobs.is_empty() {
             let media_qt_thread = qt_thread.clone();
             std::thread::spawn(move || {
@@ -273,6 +272,9 @@ impl qobject::FolderBrowserController {
                 }
             });
         }
+
+        if !directory_jobs.is_empty() {
+
 
             std::thread::spawn(move || {
                 let status_qt_thread = qt_thread.clone();
