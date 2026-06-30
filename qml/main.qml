@@ -592,6 +592,7 @@ ApplicationWindow {
         if (paths.length === 0)
             return
         if (paths.length === 1) {
+            rememberFocusAfterTrash(paths)
             selectedPaths = []
             controller.trashPaths(paths.join("\n"))
             return
@@ -603,16 +604,19 @@ ApplicationWindow {
 
     function confirmTrashSelected() {
         if (pendingTrashPaths.length > 0) {
+            rememberFocusAfterTrash(pendingTrashPaths)
             selectedPaths = []
             controller.trashPaths(pendingTrashPaths.join("\n"))
         }
         pendingTrashPaths = []
         trashConfirmDialog.close()
+        Qt.callLater(fileListView.forceListFocus)
     }
 
     function cancelTrashSelected() {
         pendingTrashPaths = []
         trashConfirmDialog.close()
+        Qt.callLater(fileListView.forceListFocus)
     }
 
     function openHeaderMenu(columnName, sceneX, sceneY) {
@@ -653,6 +657,81 @@ ApplicationWindow {
 
     function isParentEntry(row) { return row && row.isParentEntry === true }
 
+
+    property int pendingFocusIndexAfterRefresh: -1
+    property string pendingFocusPathAfterRefresh: ""
+
+    function setCurrentIndexAndSelect(index) {
+        if (index < 0 || index >= fileModel.count) {
+            fileListView.currentIndex = fileModel.count > 0 ? 0 : -1
+            selectedPaths = []
+            return
+        }
+        fileListView.currentIndex = index
+        let path = rowPathAt(index)
+        selectedPaths = path.length > 0 ? [path] : []
+        fileListView.containIndex(index)
+        fileListView.forceListFocus()
+    }
+
+    function applyPendingFocusAfterRefresh() {
+        if (pendingFocusPathAfterRefresh.length > 0) {
+            let wantedPath = pendingFocusPathAfterRefresh
+            pendingFocusPathAfterRefresh = ""
+            for (let index = 0; index < fileModel.count; index += 1) {
+                let row = fileModel.get(index)
+                if (String(row.path || "") === wantedPath) {
+                    setCurrentIndexAndSelect(index)
+                    pendingFocusIndexAfterRefresh = -1
+                    return
+                }
+            }
+            let wantedName = wantedPath.split("/").pop()
+            for (let index = 0; index < fileModel.count; index += 1) {
+                let row = fileModel.get(index)
+                if (String(row.name || "") === wantedName) {
+                    setCurrentIndexAndSelect(index)
+                    pendingFocusIndexAfterRefresh = -1
+                    return
+                }
+            }
+        }
+
+        if (pendingFocusIndexAfterRefresh >= 0) {
+            let index = Math.max(0, Math.min(pendingFocusIndexAfterRefresh, fileModel.count - 1))
+            pendingFocusIndexAfterRefresh = -1
+            if (fileModel.count > 0)
+                setCurrentIndexAndSelect(index)
+            else
+                selectedPaths = []
+            fileListView.forceListFocus()
+        }
+    }
+
+    function rememberFocusAfterTrash(paths) {
+        let wanted = ({})
+        for (let i = 0; i < paths.length; i += 1)
+            wanted[String(paths[i])] = true
+
+        let firstDeletedIndex = -1
+        for (let index = 0; index < fileModel.count; index += 1) {
+            let row = fileModel.get(index)
+            if (wanted[String(row.path || "")]) {
+                firstDeletedIndex = index
+                break
+            }
+        }
+
+        if (firstDeletedIndex >= 0)
+            pendingFocusIndexAfterRefresh = Math.max(0, firstDeletedIndex - 1)
+        else
+            pendingFocusIndexAfterRefresh = Math.max(0, fileListView.currentIndex - 1)
+    }
+
+    function rememberParentReturnFocus() {
+        pendingFocusPathAfterRefresh = String(controller.currentPath || "")
+    }
+
     function rebuildRowsFromController() {
         let rows = [];
         let parentEntry = parentEntryRow();
@@ -682,6 +761,7 @@ ApplicationWindow {
         }
         allRows = rows;
         refreshDisplayedRows();
+        applyPendingFocusAfterRefresh();
     }
 
     function restoreCurrentIndexAfterModelRefresh(preservedPath, fallbackIndex) {
@@ -1167,7 +1247,10 @@ ApplicationWindow {
             onSortRequested: function(columnName) { root.setSort(columnName) }
             onHeaderMenuRequested: function(columnName, sceneX, sceneY) { root.openHeaderMenu(columnName, sceneX, sceneY) }
             onOpenCurrentRequested: root.openCurrentRow()
-            onGoParentRequested: root.scanPath(root.parentPath(controller.currentPath))
+            onGoParentRequested: {
+                root.rememberParentReturnFocus()
+                root.scanPath(root.parentPath(controller.currentPath))
+            }
             onDeleteRequested: root.requestTrashSelected()
             onEscapeToPathRequested: pathBar.forcePathFocus()
             onToggleSelectionRequested: function(rowIndex) { root.toggleSelection(rowIndex) }
@@ -1218,7 +1301,10 @@ ApplicationWindow {
             standardButtons: Dialog.NoButton
             closePolicy: Popup.CloseOnEscape
             onOpened: forceActiveFocus()
-            onClosed: root.pendingTrashPaths = []
+            onClosed: {
+                root.pendingTrashPaths = []
+                Qt.callLater(fileListView.forceListFocus)
+            }
 
             ColumnLayout {
                 spacing: 12
@@ -1246,6 +1332,18 @@ ApplicationWindow {
             scanDone: root.sizeScanDone
             scanTotal: root.sizeScanTotal
             secondaryTextColor: root.secondaryTextColor
+        }
+    }
+
+
+    Connections {
+        id: pendingFocusConnection
+        target: controller
+        function onUpdateGenerationChanged() {
+            if (root.pendingFocusIndexAfterRefresh >= 0 || root.pendingFocusPathAfterRefresh.length > 0) {
+                Qt.callLater(root.applyPendingFocusAfterRefresh)
+                Qt.callLater(fileListView.forceListFocus)
+            }
         }
     }
 
