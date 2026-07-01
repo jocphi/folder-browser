@@ -10,6 +10,7 @@ Rectangle {
     required property string name
     required property string kind
     required property string mimeType
+    required property string mimeStatus
     required property double sizeBytes
     required property string sizeStatus
     required property double modifiedSecs
@@ -39,6 +40,11 @@ Rectangle {
     property bool selected: false
     property bool current: false
     property bool rangeAnchor: false
+
+    property bool durationGroup: false
+    property bool durationGroupStart: false
+    property bool durationGroupEnd: false
+    property color durationGroupBorderColor: "#ef4444"
 
     property color rowEvenColor: "#1f2937"
     property color rowOddColor: "#20242b"
@@ -143,6 +149,10 @@ Rectangle {
             return "Folder"
         if (mime === "inode/symlink")
             return "Symlink"
+        if (rowDelegate.mimeStatus === "scanning")
+            return "…"
+        if (rowDelegate.mimeStatus === "error")
+            return "—"
         if (mime.length > 0)
             return mime
         return rowDelegate.kind
@@ -194,6 +204,7 @@ Rectangle {
     }
 
     function textColorForColumn(columnName) {
+        if (columnName === "kind" && (rowDelegate.mimeStatus === "scanning" || rowDelegate.mimeStatus === "error")) return rowDelegate.secondaryTextColor
         if (rowDelegate.isMediaColumn(columnName)) {
             return rowDelegate.mediaPlaceholderText(columnName).length > 0 ? rowDelegate.secondaryTextColor : rowDelegate.fileTextColor
         }
@@ -396,5 +407,46 @@ Rectangle {
                : (sortColumn === columnName
                   ? activeSortColumnVisualColor()
                   : "transparent")
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 2
+            color: rowDelegate.durationGroupBorderColor
+            visible: columnName === "duration" && rowDelegate.durationGroup
+            z: 20
+        }
+
+        Rectangle {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 2
+            color: rowDelegate.durationGroupBorderColor
+            visible: columnName === "duration" && rowDelegate.durationGroup
+            z: 20
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 2
+            color: rowDelegate.durationGroupBorderColor
+            visible: columnName === "duration" && rowDelegate.durationGroupStart
+            z: 20
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 2
+            color: rowDelegate.durationGroupBorderColor
+            visible: columnName === "duration" && rowDelegate.durationGroupEnd
+            z: 20
+        }
+
     }
 }

@@ -103,6 +103,35 @@ Rectangle {
         return Math.max(1, Math.floor(fileList.height / Math.max(1, rowHeight)) - 1)
     }
 
+    function durationGroupKeyAt(rowIndex) {
+        if (!fileModel || rowIndex < 0 || rowIndex >= fileModel.count)
+            return ""
+        let row = fileModel.get(rowIndex)
+        if (!row || row.isDir)
+            return ""
+        let seconds = Number(row.durationSecs || 0)
+        if (!Number.isFinite(seconds) || seconds <= 0)
+            return ""
+        return String(Math.round(seconds))
+    }
+
+    function isDurationGroupRow(rowIndex) {
+        let key = durationGroupKeyAt(rowIndex)
+        if (key.length === 0)
+            return false
+        return durationGroupKeyAt(rowIndex - 1) === key || durationGroupKeyAt(rowIndex + 1) === key
+    }
+
+    function isDurationGroupStart(rowIndex) {
+        let key = durationGroupKeyAt(rowIndex)
+        return key.length > 0 && isDurationGroupRow(rowIndex) && durationGroupKeyAt(rowIndex - 1) !== key
+    }
+
+    function isDurationGroupEnd(rowIndex) {
+        let key = durationGroupKeyAt(rowIndex)
+        return key.length > 0 && isDurationGroupRow(rowIndex) && durationGroupKeyAt(rowIndex + 1) !== key
+    }
+
     onCurrentIndexChanged: {
         if (fileList.currentIndex !== currentIndex) {
             fileList.currentIndex = currentIndex
@@ -267,6 +296,9 @@ Rectangle {
                 displaySizeFunction: fileListView.displaySizeFunction
                 sizeColorFunction: fileListView.sizeColorFunction
                 modifiedTextFunction: fileListView.modifiedTextFunction
+                durationGroup: fileListView.isDurationGroupRow(index)
+                durationGroupStart: fileListView.isDurationGroupStart(index)
+                durationGroupEnd: fileListView.isDurationGroupEnd(index)
                 onRowPressed: function(mouse, rowIndex) { fileListView.rowPressed(mouse, rowIndex) }
                 onRowDoubleClicked: function(rowIndex) { fileListView.rowDoubleClicked(rowIndex) }
             }
