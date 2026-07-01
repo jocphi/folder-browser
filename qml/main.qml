@@ -590,33 +590,45 @@ ApplicationWindow {
         return unique
     }
 
+    function trashPathIsDirectory(path) {
+        let wantedPath = String(path || "")
+        for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
+            let row = fileModel.get(rowIndex)
+            if (String(row.path || "") === wantedPath)
+                return Boolean(row.isDir)
+        }
+        return false
+    }
+
     function trashItemsFromPaths(paths) {
+        let jsonText = controller.trashPreviewItems(paths.join("\n"))
+        try {
+            let parsed = JSON.parse(String(jsonText || "[]"))
+            if (parsed && parsed.length !== undefined)
+                return parsed
+        } catch (error) {
+            console.log("Could not parse Trash preview JSON: " + error)
+        }
+
         let wanted = ({})
         for (let i = 0; i < paths.length; i += 1)
             wanted[String(paths[i])] = true
         let items = []
-        let found = ({})
         for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
             let row = fileModel.get(rowIndex)
             let path = String(row.path || "")
             if (wanted[path]) {
-                found[path] = true
                 items.push(({
                     checked: true,
                     path: path,
-                    name: String(row.name || path.split("/").pop()),
+                    name: "./" + String(row.name || path.split("/").pop()),
                     sizeBytes: Math.max(0, Number(row.sizeBytes || 0))
                 }))
             }
         }
-        for (let i = 0; i < paths.length; i += 1) {
-            let path = String(paths[i] || "")
-            if (path.length > 0 && !found[path]) {
-                items.push(({ checked: true, path: path, name: path.split("/").pop(), sizeBytes: 0 }))
-            }
-        }
         return items
     }
+
 
     function checkedTrashItems() {
         let items = []
@@ -683,13 +695,14 @@ ApplicationWindow {
         let paths = trashCandidatePaths()
         if (paths.length === 0)
             return
-        if (paths.length === 1) {
+        let previewItems = trashItemsFromPaths(paths)
+        if (paths.length === 1 && !trashPathIsDirectory(paths[0]) && previewItems.length === 1) {
             rememberFocusAfterTrash(paths)
             selectedPaths = []
             controller.trashPaths(paths.join("\n"))
             return
         }
-        pendingTrashItems = trashItemsFromPaths(paths)
+        pendingTrashItems = previewItems
         pendingTrashPaths = checkedTrashPaths()
         updatePendingTrashSummary()
         trashConfirmDialog.open()
@@ -1472,7 +1485,7 @@ ApplicationWindow {
 
                     Label {
                         Layout.fillWidth: true
-                        text: "Uncheck any file that should not be moved to Trash. Y confirms, N/Esc cancels."
+                        text: "Uncheck any file that should not be moved to Trash. Folder contents are listed recursively. Y confirms, N/Esc cancels."
                         color: root.secondaryTextColor
                         wrapMode: Text.Wrap
                     }
@@ -1498,7 +1511,7 @@ ApplicationWindow {
                                 required property var modelData
                                 width: trashPendingListView.width
                                 height: 32
-                                color: index % 2 === 0 ? root.rowEvenColor : root.rowOddColor
+                                color: Boolean(modelData.checked) ? (index % 2 === 0 ? root.rowEvenColor : root.rowOddColor) : Qt.darker(root.rowOddColor, 1.20)
 
                                 RowLayout {
                                     anchors.fill: parent
@@ -1511,17 +1524,47 @@ ApplicationWindow {
                                         onToggled: root.setPendingTrashItemChecked(index, checked)
                                     }
 
-                                    Label {
-                                        text: String(modelData.name || "")
-                                        color: root.fileTextColor
-                                        elide: Text.ElideRight
+                                    Item {
+                                        id: trashPreviewNameParts
                                         Layout.fillWidth: true
-                                        font.family: root.rowFontFamily
+                                        height: parent.height
+                                        clip: true
+
+                                        property string fullName: String(modelData.name || "")
+                                        property int slashIndex: fullName.lastIndexOf("/")
+                                        property string folderPart: slashIndex >= 0 ? fullName.substring(0, slashIndex + 1) : ""
+                                        property string filePart: slashIndex >= 0 ? fullName.substring(slashIndex + 1) : fullName
+                                        property bool rowChecked: Boolean(modelData.checked)
+                                        readonly property color folderTextColor: rowChecked ? "#6fdc6f" : "#808080"
+                                        readonly property color fileNameTextColor: rowChecked ? "#ffd75f" : "#808080"
+
+                                        Row {
+                                            anchors.fill: parent
+                                            spacing: 0
+
+                                            Text {
+                                                text: trashPreviewNameParts.folderPart
+                                                color: trashPreviewNameParts.folderTextColor
+                                                font.family: root.rowFontFamily
+                                                verticalAlignment: Text.AlignVCenter
+                                                height: parent.height
+                                            }
+
+                                            Text {
+                                                text: trashPreviewNameParts.filePart
+                                                color: trashPreviewNameParts.fileNameTextColor
+                                                font.family: root.rowFontFamily
+                                                verticalAlignment: Text.AlignVCenter
+                                                height: parent.height
+                                                width: Math.max(0, parent.width - x)
+                                                elide: Text.ElideRight
+                                            }
+                                        }
                                     }
 
                                     Label {
                                         text: root.formatTrashSize(Number(modelData.sizeBytes || 0))
-                                        color: root.secondaryTextColor
+                                        color: Boolean(modelData.checked) ? root.secondaryTextColor : "#808080"
                                         horizontalAlignment: Text.AlignRight
                                         Layout.preferredWidth: 110
                                         font.family: root.rowFontFamily
