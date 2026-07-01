@@ -785,6 +785,11 @@ ApplicationWindow {
         if (fileListView.currentIndex < 0 || fileListView.currentIndex >= fileModel.count)
             return
         let row = fileModel.get(fileListView.currentIndex)
+        if (!row || Boolean(row.isDir) || String(row.name || "") === "..") {
+            previewPendingPath = ""
+            clearPreview("No file selected")
+            return
+        }
         if (!row || root.isParentEntry(row) || row.isDir) {
             clearPreview("No file selected")
             return
@@ -1271,6 +1276,196 @@ ApplicationWindow {
         }
     }
 
+
+
+
+    function statusIsParentRow(row) {
+        return row && String(row.name || "") === ".."
+    }
+
+    function statusDisplayRowCount() {
+        let total = fileModel.count
+        if (total > 0 && root.statusIsParentRow(fileModel.get(0)))
+            total -= 1
+        return Math.max(0, total)
+    }
+
+    function statusDisplayPosition() {
+        if (fileListView.currentIndex < 0)
+            return 0
+        let row = fileModel.get(fileListView.currentIndex)
+        if (root.statusIsParentRow(row))
+            return 0
+        if (fileModel.count > 0 && root.statusIsParentRow(fileModel.get(0)))
+            return Math.max(0, fileListView.currentIndex)
+        return fileListView.currentIndex + 1
+    }
+
+
+
+
+    function statusPropertyScanColumnKeys() {
+        let keys = []
+        let columns = fileListView.effectiveColumnProfileColumns || []
+        for (let index = 0; index < columns.length; index += 1) {
+            let key = String(columns[index].key || "")
+            if (key === "size" || key === "kind" || key === "mimeType"
+                    || key === "duration" || key === "codec" || key === "videoCodec"
+                    || key === "audioCodec" || key === "bitrate" || key === "fps"
+                    || key === "width" || key === "height") {
+                keys.push(key)
+            }
+        }
+        return keys
+    }
+
+    function statusPropertyScanTotal() {
+        let keys = root.statusPropertyScanColumnKeys()
+        if (keys.length <= 0)
+            return 0
+        let totalFiles = 0
+        for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
+            let row = fileModel.get(rowIndex)
+            if (!row || root.statusIsParentRow(row))
+                continue
+            totalFiles += 1
+        }
+        return totalFiles
+    }
+
+    function statusPropertyScanDone() {
+        let keys = root.statusPropertyScanColumnKeys()
+        if (keys.length <= 0)
+            return 0
+        let doneCells = 0
+        let totalFiles = 0
+        for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
+            let row = fileModel.get(rowIndex)
+            if (!row || root.statusIsParentRow(row))
+                continue
+            totalFiles += 1
+            for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
+                let key = keys[keyIndex]
+                let status = ""
+                if (key === "size")
+                    status = String(row.sizeStatus || "")
+                else if (key === "kind" || key === "mimeType")
+                    status = String(row.mimeStatus || "")
+                else
+                    status = String(row.mediaStatus || "")
+                if (status !== "scanning")
+                    doneCells += 1
+            }
+        }
+        let doneFiles = Math.floor(doneCells / Math.max(1, keys.length))
+        if (totalFiles > 0 && doneFiles <= 0)
+            return 1
+        return Math.min(doneFiles, totalFiles)
+    }
+
+    function previewTitleText() {
+        let pathText = String(root.previewPath || "")
+        if (pathText.length <= 0)
+            return "Preview"
+        let parts = pathText.split("/")
+        let name = parts.length > 0 ? parts[parts.length - 1] : pathText
+        return name.length > 0 ? name : "Preview"
+    }
+    function statusPad2(value) {
+        return String(value).padStart(2, "0")
+    }
+
+    function statusFormatDuration(seconds) {
+        let total = Math.max(0, Math.round(Number(seconds || 0)))
+        let hours = Math.floor(total / 3600)
+        let minutes = Math.floor((total % 3600) / 60)
+        let secs = total % 60
+        return root.statusPad2(hours) + ":" + root.statusPad2(minutes) + ":" + root.statusPad2(secs)
+    }
+
+    function statusFormatBytes(bytes) {
+        let value = Math.max(0, Number(bytes || 0))
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        let unitIndex = 0
+        while (value >= 1024 && unitIndex < units.length - 1) {
+            value = value / 1024
+            unitIndex += 1
+        }
+        if (unitIndex === 0)
+            return String(Math.round(value)) + " " + units[unitIndex]
+        return (value >= 10 ? value.toFixed(0) : value.toFixed(1)).replace(/\.0$/, "") + " " + units[unitIndex]
+    }
+
+    function statusIsSelectedRow(row) {
+        if (!row)
+            return false
+        let pathText = String(row.path || "")
+        return pathText.length > 0 && selectedPaths.indexOf(pathText) >= 0
+    }
+
+    function statusSelectedCount() {
+        return selectedPaths.length
+    }
+
+    function statusSumSize(selectedOnly) {
+        let total = 0
+        for (let index = 0; index < fileModel.count; index += 1) {
+            let row = fileModel.get(index)
+            if (!row || row.isDir)
+                continue
+            if (selectedOnly && !root.statusIsSelectedRow(row))
+                continue
+            let value = Number(row.sizeBytes || 0)
+            if (Number.isFinite(value) && value > 0)
+                total += value
+        }
+        return total
+    }
+
+    function statusSumDuration(selectedOnly) {
+        let total = 0
+        for (let index = 0; index < fileModel.count; index += 1) {
+            let row = fileModel.get(index)
+            if (!row || row.isDir)
+                continue
+            if (selectedOnly && !root.statusIsSelectedRow(row))
+                continue
+            let value = Number(row.durationSecs || 0)
+            if (Number.isFinite(value) && value > 0)
+                total += value
+        }
+        return total
+    }
+
+    function statusScanningPreviewCount() {
+        let scanning = 0
+        for (let index = 0; index < fileModel.count; index += 1) {
+            let row = fileModel.get(index)
+            if (!row || row.isDir)
+                continue
+            if (String(row.mediaStatus || "") === "scanning"
+                    || String(row.mimeStatus || "") === "scanning"
+                    || String(row.sizeStatus || "") === "scanning") {
+                scanning += 1
+            }
+        }
+        return scanning
+    }
+
+    function statusFileCount() {
+        let total = 0
+        for (let index = 0; index < fileModel.count; index += 1) {
+            let row = fileModel.get(index)
+            if (row && !row.isDir)
+                total += 1
+        }
+        return total
+    }
+
+    function statusAnalysisText() {
+        return controller.isScanning ? "File analysis running" : "File analysis finished"
+    }
+
     FolderBrowserController {
         id: controller
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
@@ -1578,7 +1773,7 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Label {
-                            text: "Preview"
+                            text: root.previewTitleText()
                             color: root.headerTextColor
                             font.bold: true
                             Layout.fillWidth: true
@@ -1690,6 +1885,71 @@ ApplicationWindow {
             }
 
         }
+
+
+        RowLayout {
+            id: richStatusBar
+            Layout.fillWidth: true
+            Layout.preferredHeight: 28
+            spacing: 8
+
+            RowLayout {
+                id: richStatusLeft
+                Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
+                spacing: 8
+
+                Label {
+                    text: "📍 Pos: " + String(root.statusDisplayPosition()) + "/" + String(root.statusDisplayRowCount())
+                    color: root.secondaryTextColor
+                    font.family: root.rowFontFamily
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                Label {
+                    text: "☑ Sel: " + String(root.statusSelectedCount()) + "/" + String(root.statusDisplayRowCount())
+                    color: root.secondaryTextColor
+                    font.family: root.rowFontFamily
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                Label {
+                    text: "💾 Size: " + root.statusFormatBytes(root.statusSumSize(true)) + "/" + root.statusFormatBytes(root.statusSumSize(false))
+                    color: root.secondaryTextColor
+                    font.family: root.rowFontFamily
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                Label {
+                    text: "⏱ Duration: " + root.statusFormatDuration(root.statusSumDuration(true)) + "/" + root.statusFormatDuration(root.statusSumDuration(false))
+                    color: root.secondaryTextColor
+                    font.family: root.rowFontFamily
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                Label {
+                    text: "⚙ Scanning properties: " + String(root.statusPropertyScanDone()) + " / " + String(root.statusPropertyScanTotal())
+                    color: root.secondaryTextColor
+                    font.family: root.rowFontFamily
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            Label {
+                id: richStatusRight
+                text: "✓ " + root.statusAnalysisText()
+                color: root.secondaryTextColor
+                font.family: root.rowFontFamily
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                Layout.preferredWidth: 280
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
+        }
+
+
 
 
 
@@ -1893,11 +2153,9 @@ ApplicationWindow {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        Label {
-                            text: root.pendingTrashSummary
-                            color: root.secondaryTextColor
-                            Layout.fillWidth: true
-                        }
+                
+
+
                         Button {
                             text: "No"
                             onClicked: root.cancelTrashSelected()
@@ -1945,18 +2203,6 @@ ApplicationWindow {
             }
         }
 
-        StatusBar {
-            Layout.fillWidth: true
-            statusText: controller.statusText
-            selectedCount: selectedPaths.length
-            visibleCount: fileListView.count
-            totalCount: allRows.length
-            filterText: root.filterText
-            isScanning: controller.isScanning || root.isScanningSizes
-            scanDone: root.sizeScanDone
-            scanTotal: root.sizeScanTotal
-            secondaryTextColor: root.secondaryTextColor
-        }
     }
 
 
