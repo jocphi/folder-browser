@@ -531,8 +531,27 @@ ApplicationWindow {
     }
 
 
+
+    // Trash confirmation state. The dialog keeps a per-item checked flag so
+    // individual files can be removed from the pending delete operation.
+    property var pendingTrashItems: []
     property var pendingTrashPaths: []
     property string pendingTrashSummary: ""
+
+    // Persisted dialog geometry. The Settings object below stores values across runs.
+    property real trashDialogRememberedX: Number.isFinite(Number(trashDialogSettings.x)) ? Number(trashDialogSettings.x) : -1
+    property real trashDialogRememberedY: Number.isFinite(Number(trashDialogSettings.y)) ? Number(trashDialogSettings.y) : -1
+    property real trashDialogRememberedWidth: Math.max(520, Number.isFinite(Number(trashDialogSettings.width)) ? Number(trashDialogSettings.width) : 760)
+    property real trashDialogRememberedHeight: Math.max(360, Number.isFinite(Number(trashDialogSettings.height)) ? Number(trashDialogSettings.height) : 520)
+
+    Settings {
+        id: trashDialogSettings
+        category: "TrashConfirmDialog"
+        property real x: -1
+        property real y: -1
+        property real width: 760
+        property real height: 520
+    }
 
     function formatTrashSize(bytes) {
         if (bytes === null || bytes === undefined || Number(bytes) <= 0)
@@ -571,20 +590,93 @@ ApplicationWindow {
         return unique
     }
 
-    function accumulatedTrashSize(paths) {
+    function trashItemsFromPaths(paths) {
         let wanted = ({})
         for (let i = 0; i < paths.length; i += 1)
             wanted[String(paths[i])] = true
-        let total = 0
+        let items = []
+        let found = ({})
         for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
             let row = fileModel.get(rowIndex)
-            if (wanted[String(row.path || "")]) {
-                let size = Number(row.sizeBytes || 0)
-                if (size > 0)
-                    total += size
+            let path = String(row.path || "")
+            if (wanted[path]) {
+                found[path] = true
+                items.push(({
+                    checked: true,
+                    path: path,
+                    name: String(row.name || path.split("/").pop()),
+                    sizeBytes: Math.max(0, Number(row.sizeBytes || 0))
+                }))
             }
         }
+        for (let i = 0; i < paths.length; i += 1) {
+            let path = String(paths[i] || "")
+            if (path.length > 0 && !found[path]) {
+                items.push(({ checked: true, path: path, name: path.split("/").pop(), sizeBytes: 0 }))
+            }
+        }
+        return items
+    }
+
+    function checkedTrashItems() {
+        let items = []
+        for (let i = 0; i < pendingTrashItems.length; i += 1) {
+            if (pendingTrashItems[i].checked)
+                items.push(pendingTrashItems[i])
+        }
+        return items
+    }
+
+    function checkedTrashPaths() {
+        let items = checkedTrashItems()
+        let paths = []
+        for (let i = 0; i < items.length; i += 1)
+            paths.push(items[i].path)
+        return paths
+    }
+
+    function pendingTrashSelectedCount() {
+        return checkedTrashItems().length
+    }
+
+    function pendingTrashSelectedSize() {
+        let total = 0
+        let items = checkedTrashItems()
+        for (let i = 0; i < items.length; i += 1)
+            total += Math.max(0, Number(items[i].sizeBytes || 0))
         return total
+    }
+
+    function updatePendingTrashSummary() {
+        pendingTrashSummary = String(pendingTrashSelectedCount()) + " of " + String(pendingTrashItems.length)
+                + " items, " + formatTrashSize(pendingTrashSelectedSize())
+    }
+
+    function setPendingTrashItemChecked(index, checked) {
+        if (index < 0 || index >= pendingTrashItems.length)
+            return
+        let copy = pendingTrashItems.slice()
+        let item = ({
+            checked: checked,
+            path: copy[index].path,
+            name: copy[index].name,
+            sizeBytes: copy[index].sizeBytes
+        })
+        copy[index] = item
+        pendingTrashItems = copy
+        pendingTrashPaths = checkedTrashPaths()
+        updatePendingTrashSummary()
+    }
+
+    function rememberTrashDialogGeometry() {
+        trashDialogSettings.x = trashConfirmDialog.x
+        trashDialogSettings.y = trashConfirmDialog.y
+        trashDialogSettings.width = trashConfirmDialog.width
+        trashDialogSettings.height = trashConfirmDialog.height
+        trashDialogRememberedX = trashConfirmDialog.x
+        trashDialogRememberedY = trashConfirmDialog.y
+        trashDialogRememberedWidth = trashConfirmDialog.width
+        trashDialogRememberedHeight = trashConfirmDialog.height
     }
 
     function requestTrashSelected() {
@@ -597,23 +689,27 @@ ApplicationWindow {
             controller.trashPaths(paths.join("\n"))
             return
         }
-        pendingTrashPaths = paths
-        pendingTrashSummary = String(paths.length) + " items, " + formatTrashSize(accumulatedTrashSize(paths))
+        pendingTrashItems = trashItemsFromPaths(paths)
+        pendingTrashPaths = checkedTrashPaths()
+        updatePendingTrashSummary()
         trashConfirmDialog.open()
     }
 
     function confirmTrashSelected() {
-        if (pendingTrashPaths.length > 0) {
-            rememberFocusAfterTrash(pendingTrashPaths)
+        let paths = checkedTrashPaths()
+        if (paths.length > 0) {
+            rememberFocusAfterTrash(paths)
             selectedPaths = []
-            controller.trashPaths(pendingTrashPaths.join("\n"))
+            controller.trashPaths(paths.join("\n"))
         }
+        pendingTrashItems = []
         pendingTrashPaths = []
         trashConfirmDialog.close()
         Qt.callLater(fileListView.forceListFocus)
     }
 
     function cancelTrashSelected() {
+        pendingTrashItems = []
         pendingTrashPaths = []
         trashConfirmDialog.close()
         Qt.callLater(fileListView.forceListFocus)
@@ -1292,31 +1388,199 @@ ApplicationWindow {
             onActivated: root.cancelTrashSelected()
         }
 
+
         Dialog {
             id: trashConfirmDialog
             modal: true
             focus: true
-            title: "Move selected items to Trash?"
-            anchors.centerIn: parent
+            title: ""
             standardButtons: Dialog.NoButton
             closePolicy: Popup.CloseOnEscape
+            width: Math.max(520, root.trashDialogRememberedWidth)
+            height: Math.max(360, root.trashDialogRememberedHeight)
+            x: root.trashDialogRememberedX >= 0 ? root.trashDialogRememberedX : Math.round((root.width - width) / 2)
+            y: root.trashDialogRememberedY >= 0 ? root.trashDialogRememberedY : Math.round((root.height - height) / 2)
+            padding: 0
             onOpened: forceActiveFocus()
             onClosed: {
+                root.pendingTrashItems = []
                 root.pendingTrashPaths = []
+                root.rememberTrashDialogGeometry()
                 Qt.callLater(fileListView.forceListFocus)
             }
+            onXChanged: if (opened) trashDialogSettings.x = x
+            onYChanged: if (opened) trashDialogSettings.y = y
+            onWidthChanged: if (opened) trashDialogSettings.width = width
+            onHeightChanged: if (opened) trashDialogSettings.height = height
 
-            ColumnLayout {
-                spacing: 12
-                Label {
-                    text: "Move " + root.pendingTrashSummary + " to Trash?"
-                    wrapMode: Text.Wrap
-                    Layout.preferredWidth: 360
+            background: Rectangle {
+                color: root.panelBackgroundColor
+                border.color: root.panelBorderColor
+                radius: 10
+            }
+
+            contentItem: Item {
+                implicitWidth: 760
+                implicitHeight: 520
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 10
+
+                    Rectangle {
+                        id: trashDialogTitleBar
+                        Layout.fillWidth: true
+                        height: 34
+                        color: root.headerBackgroundColor
+                        radius: 6
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            Label {
+                                text: "Move selected items to Trash?"
+                                color: root.headerTextColor
+                                font.bold: true
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: root.pendingTrashSummary
+                                color: root.secondaryTextColor
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            property real pressX: 0
+                            property real pressY: 0
+                            onPressed: {
+                                pressX = mouseX
+                                pressY = mouseY
+                            }
+                            onPositionChanged: {
+                                if (pressed) {
+                                    trashConfirmDialog.x += mouseX - pressX
+                                    trashConfirmDialog.y += mouseY - pressY
+                                }
+                            }
+                            onReleased: root.rememberTrashDialogGeometry()
+                        }
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Uncheck any file that should not be moved to Trash. Y confirms, N/Esc cancels."
+                        color: root.secondaryTextColor
+                        wrapMode: Text.Wrap
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: Qt.darker(root.panelBackgroundColor, 1.08)
+                        border.color: root.panelBorderColor
+                        radius: 6
+                        clip: true
+
+                        ListView {
+                            id: trashPendingListView
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            model: root.pendingTrashItems
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+
+                            delegate: Rectangle {
+                                required property int index
+                                required property var modelData
+                                width: trashPendingListView.width
+                                height: 32
+                                color: index % 2 === 0 ? root.rowEvenColor : root.rowOddColor
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+
+                                    CheckBox {
+                                        checked: Boolean(modelData.checked)
+                                        onToggled: root.setPendingTrashItemChecked(index, checked)
+                                    }
+
+                                    Label {
+                                        text: String(modelData.name || "")
+                                        color: root.fileTextColor
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                        font.family: root.rowFontFamily
+                                    }
+
+                                    Label {
+                                        text: root.formatTrashSize(Number(modelData.sizeBytes || 0))
+                                        color: root.secondaryTextColor
+                                        horizontalAlignment: Text.AlignRight
+                                        Layout.preferredWidth: 110
+                                        font.family: root.rowFontFamily
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: root.pendingTrashSummary
+                            color: root.secondaryTextColor
+                            Layout.fillWidth: true
+                        }
+                        Button {
+                            text: "No"
+                            onClicked: root.cancelTrashSelected()
+                        }
+                        Button {
+                            text: "Yes"
+                            highlighted: true
+                            enabled: root.pendingTrashSelectedCount() > 0
+                            onClicked: root.confirmTrashSelected()
+                        }
+                    }
                 }
-                RowLayout {
-                    Layout.alignment: Qt.AlignRight
-                    Button { text: "No"; onClicked: root.cancelTrashSelected() }
-                    Button { text: "Yes"; highlighted: true; onClicked: root.confirmTrashSelected() }
+
+                Rectangle {
+                    width: 18
+                    height: 18
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    color: "transparent"
+                    border.color: root.secondaryTextColor
+                    opacity: 0.55
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.SizeFDiagCursor
+                        property real startX: 0
+                        property real startY: 0
+                        property real startWidth: 0
+                        property real startHeight: 0
+                        onPressed: {
+                            startX = mouseX
+                            startY = mouseY
+                            startWidth = trashConfirmDialog.width
+                            startHeight = trashConfirmDialog.height
+                        }
+                        onPositionChanged: {
+                            if (pressed) {
+                                trashConfirmDialog.width = Math.max(520, startWidth + mouseX - startX)
+                                trashConfirmDialog.height = Math.max(360, startHeight + mouseY - startY)
+                            }
+                        }
+                        onReleased: root.rememberTrashDialogGeometry()
+                    }
                 }
             }
         }
