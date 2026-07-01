@@ -24,6 +24,7 @@ ApplicationWindow {
     property string previewTextContent: ""
     property string previewImageSource: ""
     property var previewVideoFrames: []
+    property var previewVideoFramePercents: [1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99]
     property bool previewVideoSlideshowEnabled: true
     property int previewVideoFrameIndex: 0
     property string previewStatusText: "Preview disabled"
@@ -806,6 +807,28 @@ ApplicationWindow {
         previewStatusText = message || "No preview"
     }
 
+
+    function previewClampVideoFrameIndex() {
+        if (previewVideoFrames.length <= 0) {
+            previewVideoFrameIndex = 0
+            return
+        }
+        previewVideoFrameIndex = Math.max(0, Math.min(previewVideoFrameIndex, previewVideoFrames.length - 1))
+    }
+
+    function previewShowVideoFrame(index) {
+        if (previewVideoFrames.length <= 0)
+            return
+        previewVideoFrameIndex = Math.max(0, Math.min(index, previewVideoFrames.length - 1))
+        previewImageSource = "file://" + previewVideoFrames[previewVideoFrameIndex]
+    }
+
+    function previewVideoTimelinePercent() {
+        if (previewVideoFramePercents.length > previewVideoFrameIndex)
+            return previewVideoFramePercents[previewVideoFrameIndex]
+        return previewVideoFrames.length <= 1 ? 1 : Math.round(previewVideoFrameIndex * 100 / Math.max(1, previewVideoFrames.length - 1))
+    }
+
     function loadPreviewForPendingPath() {
         if (!previewFilesEnabled || previewPendingPath.length === 0)
             return
@@ -822,7 +845,7 @@ ApplicationWindow {
         previewVideoFrames = []
         previewVideoFrameIndex = 0
         previewSlideTimer.stop()
-        controller.startPreview(previewPath, mime, previewVideoSlideshowEnabled)
+        controller.startPreview(previewPath, mime, mime.indexOf("video/") === 0 ? true : previewVideoSlideshowEnabled)
     }
 
 
@@ -1231,7 +1254,7 @@ ApplicationWindow {
         onTriggered: {
             if (root.previewVideoFrames.length > 0) {
                 root.previewVideoFrameIndex = (root.previewVideoFrameIndex + 1) % root.previewVideoFrames.length
-                root.previewImageSource = "file://" + root.previewVideoFrames[root.previewVideoFrameIndex]
+                root.previewShowVideoFrame(root.previewVideoFrameIndex)
             }
         }
     }
@@ -1270,11 +1293,14 @@ ApplicationWindow {
             root.previewTextContent = controller.previewTextContent
             root.previewVideoFrames = []
             try { root.previewVideoFrames = JSON.parse(String(controller.previewFramesJson || "[]")) } catch (error) { root.previewVideoFrames = [] }
-            root.previewVideoFrameIndex = 0
-            if (controller.previewImageSource.length > 0)
+            root.previewClampVideoFrameIndex()
+            if (root.previewVideoFrames.length > 0) {
+                root.previewShowVideoFrame(root.previewVideoFrameIndex)
+            } else if (controller.previewImageSource.length > 0) {
                 root.previewImageSource = "file://" + controller.previewImageSource
-            else
+            } else {
                 root.previewImageSource = ""
+            }
             if (root.previewMode === "video" && root.previewVideoSlideshowEnabled && root.previewVideoFrames.length > 1)
                 previewSlideTimer.restart()
             else
@@ -1346,11 +1372,15 @@ ApplicationWindow {
         refreshDisplayedRows()
     }
     onFollowSymlinksChanged: saveInterfaceSettings()
+    onClosing: controller.cleanupPreviewCache()
+
     Component.onCompleted: {
         loadColorSettings()
         loadInterfaceSettings()
         scanPath(savedStartupPath.length > 0 ? savedStartupPath : controller.currentPath)
     }
+
+    Component.onDestruction: controller.cleanupPreviewCache()
 
     ColumnLayout {
         anchors.fill: parent
@@ -1568,15 +1598,49 @@ ApplicationWindow {
                         elide: Text.ElideMiddle
                     }
 
-                    CheckBox {
-                        text: "Video slideshow"
+
+                    RowLayout {
                         visible: root.previewMode === "video" || (fileListView.currentIndex >= 0 && fileModel.count > fileListView.currentIndex && String(fileModel.get(fileListView.currentIndex).mimeType || "").indexOf("video/") === 0)
-                        checked: root.previewVideoSlideshowEnabled
-                        onToggled: {
-                            root.previewVideoSlideshowEnabled = checked
-                            root.previewCurrentRow()
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        CheckBox {
+                            text: "Video slideshow"
+                            checked: root.previewVideoSlideshowEnabled
+                            onToggled: {
+                                root.previewVideoSlideshowEnabled = checked
+                                if (checked) {
+                                    if (root.previewVideoFrames.length > 1)
+                                        previewSlideTimer.restart()
+                                    else
+                                        root.previewCurrentRow()
+                                } else {
+                                    previewSlideTimer.stop()
+                                    root.previewShowVideoFrame(root.previewVideoFrameIndex)
+                                }
+                            }
+                        }
+
+                        Slider {
+                            id: previewVideoTimelineSlider
+                            Layout.fillWidth: true
+                            from: 0
+                            to: Math.max(0, root.previewVideoFrames.length - 1)
+                            stepSize: 1
+                            snapMode: Slider.SnapAlways
+                            enabled: !root.previewVideoSlideshowEnabled && root.previewVideoFrames.length > 1
+                            value: root.previewVideoFrameIndex
+                            onMoved: root.previewShowVideoFrame(Math.round(value))
+                        }
+
+                        Label {
+                            text: root.previewVideoTimelinePercent() + "%"
+                            color: root.secondaryTextColor
+                            Layout.preferredWidth: 44
+                            horizontalAlignment: Text.AlignRight
                         }
                     }
+
 
                     Rectangle {
                         Layout.fillWidth: true
@@ -1586,17 +1650,23 @@ ApplicationWindow {
                         radius: 6
                         clip: true
 
-                        TextArea {
+                        ScrollView {
                             visible: root.previewMode === "text"
                             anchors.fill: parent
                             anchors.margins: 6
-                            readOnly: true
-                            selectByMouse: true
-                            wrapMode: TextEdit.NoWrap
-                            text: root.previewTextContent
-                            color: root.fileTextColor
-                            font.family: root.rowFontFamily
-                            background: Rectangle { color: "transparent" }
+                            clip: true
+
+                            TextEdit {
+                                id: previewTextEdit
+                                text: root.previewTextContent
+                                readOnly: true
+                                selectByMouse: true
+                                wrapMode: TextEdit.NoWrap
+                                color: root.fileTextColor
+                                font.family: root.rowFontFamily
+                                textFormat: TextEdit.PlainText
+                                width: Math.max(parent.width, implicitWidth)
+                            }
                         }
 
                         Image {

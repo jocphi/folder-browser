@@ -60,6 +60,10 @@ pub mod qobject {
         fn preview_video_frames(&self, path: &QString) -> QString;
 
         #[qinvokable]
+        #[cxx_name = "cleanupPreviewCache"]
+        fn cleanup_preview_cache(&self);
+
+        #[qinvokable]
         #[cxx_name = "startPreview"]
         fn start_preview(self: Pin<&mut Self>, path: &QString, mime: &QString, slideshow: bool);
 
@@ -429,8 +433,8 @@ fn preview_video_frame_paths(path: &std::path::Path) -> Vec<PathBuf> {
     let _ = std::fs::create_dir_all(&cache_dir);
     let Some(duration) = ffprobe_duration_seconds(path) else { return Vec::new(); };
     let mut frames = Vec::new();
-    for percent in 1..=9 {
-        let timestamp = duration * (percent as f64) / 10.0;
+    for percent in [1_u32, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99] {
+        let timestamp = duration * (percent as f64) / 100.0;
         let output_path = cache_dir.join(format!("frame_{percent:02}.jpg"));
         if !output_path.exists() {
             let _ = std::process::Command::new("ffmpeg")
@@ -619,6 +623,10 @@ impl qobject::FolderBrowserController {
                 controller.as_mut().set_preview_result_generation(next);
             });
         });
+    }
+
+    pub fn cleanup_preview_cache(&self) {
+        let _ = std::fs::remove_dir_all(std::env::temp_dir().join("folder-browser-preview"));
     }
 
     pub fn preview_text(&self, path: &QString) -> QString {
