@@ -21,6 +21,13 @@ pub mod qobject {
         #[qproperty(bool, is_scanning, cxx_name = "isScanning")]
         #[qproperty(i32, size_scan_done, cxx_name = "sizeScanDone")]
         #[qproperty(i32, size_scan_total, cxx_name = "sizeScanTotal")]
+        #[qproperty(i32, preview_result_generation, cxx_name = "previewResultGeneration")]
+        #[qproperty(QString, preview_mode, cxx_name = "previewMode")]
+        #[qproperty(QString, preview_status, cxx_name = "previewStatus")]
+        #[qproperty(QString, preview_text_content, cxx_name = "previewTextContent")]
+        #[qproperty(QString, preview_image_source, cxx_name = "previewImageSource")]
+        #[qproperty(QString, preview_frames_json, cxx_name = "previewFramesJson")]
+        #[qproperty(bool, preview_working, cxx_name = "previewWorking")]
         #[namespace = "folder_browser"]
         type FolderBrowserController = super::FolderBrowserControllerRust;
 
@@ -51,6 +58,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "previewVideoFrames"]
         fn preview_video_frames(&self, path: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "startPreview"]
+        fn start_preview(self: Pin<&mut Self>, path: &QString, mime: &QString, slideshow: bool);
 
         #[qinvokable]
         #[cxx_name = "fileName"]
@@ -156,8 +167,16 @@ pub struct FolderBrowserControllerRust {
     is_scanning: bool,
     size_scan_done: i32,
     size_scan_total: i32,
+    preview_result_generation: i32,
+    preview_mode: QString,
+    preview_status: QString,
+    preview_text_content: QString,
+    preview_image_source: QString,
+    preview_frames_json: QString,
+    preview_working: bool,
     pub(crate) rows: Vec<FileRow>,
     pub(crate) scan_generation: u64,
+    pub(crate) preview_generation: u64,
 }
 
 
@@ -442,6 +461,30 @@ fn read_text_preview(path: &std::path::Path, max_bytes: usize) -> String {
 }
 
 
+
+fn preview_video_still_path(path: &std::path::Path) -> Option<PathBuf> {
+    let path_string = path.to_string_lossy().to_string();
+    let cache_dir = preview_cache_dir_for(&path_string);
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let duration = ffprobe_duration_seconds(path).unwrap_or(10.0);
+    let timestamp = (duration * 0.10).max(0.1);
+    let output_path = cache_dir.join("still.jpg");
+    if !output_path.exists() {
+        let _ = std::process::Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-hide_banner")
+            .arg("-loglevel").arg("error")
+            .arg("-ss").arg(format!("{timestamp:.3}"))
+            .arg("-i").arg(path)
+            .arg("-frames:v").arg("1")
+            .arg("-q:v").arg("3")
+            .arg(&output_path)
+            .output();
+    }
+    if output_path.exists() { Some(output_path) } else { None }
+}
+
+
 impl qobject::FolderBrowserController {
     pub fn increment_click_count(mut self: Pin<&mut Self>) {
         let previous = *self.click_count();
@@ -504,6 +547,76 @@ impl qobject::FolderBrowserController {
                     controller.as_mut().set_row_count(row_count);
                     bump_update_generation(controller.as_mut());
                 }
+            });
+        });
+    }
+
+    pub fn start_preview(mut self: Pin<&mut Self>, path: &QString, mime: &QString, slideshow: bool) {
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        let mime = mime.to_string();
+        let preview_generation = self.rust().preview_generation.wrapping_add(1);
+        self.as_mut().rust_mut().preview_generation = preview_generation;
+        let qt_thread = self.qt_thread();
+
+        self.as_mut().set_preview_working(true);
+        self.as_mut().set_preview_status(QString::from("Working on preview..."));
+        self.as_mut().set_preview_mode(QString::from("none"));
+        self.as_mut().set_preview_text_content(QString::from(""));
+        self.as_mut().set_preview_image_source(QString::from(""));
+        self.as_mut().set_preview_frames_json(QString::from("[]"));
+
+        std::thread::spawn(move || {
+            let path_buf = PathBuf::from(local_path.clone());
+            let mut mode = String::from("none");
+            let mut status = String::from("No preview available");
+            let mut text = String::new();
+            let mut image = String::new();
+            let mut frames_json = String::from("[]");
+
+            if mime.starts_with("image/") {
+                mode = String::from("image");
+                image = local_path.clone();
+                status = path_buf.file_name().map(|v| v.to_string_lossy().to_string()).unwrap_or(local_path.clone());
+            } else if mime.starts_with("video/") {
+                if slideshow {
+                    let frames = preview_video_frame_paths(&path_buf);
+                    let mut json = String::from("[");
+                    for (index, frame) in frames.iter().enumerate() {
+                        if index > 0 { json.push(','); }
+                        json.push_str(&format!("\"{}\"", preview_json_escape(&frame.to_string_lossy())));
+                    }
+                    json.push(']');
+                    if let Some(first) = frames.first() {
+                        mode = String::from("video");
+                        image = first.to_string_lossy().to_string();
+                        frames_json = json;
+                        status = String::from("Video slideshow preview");
+                    }
+                } else if let Some(still) = preview_video_still_path(&path_buf) {
+                    mode = String::from("image");
+                    image = still.to_string_lossy().to_string();
+                    status = String::from("Video still preview");
+                }
+            } else {
+                let preview_text = read_text_preview(&path_buf, 512 * 1024);
+                if !preview_text.is_empty() {
+                    mode = String::from("text");
+                    text = preview_text;
+                    status = path_buf.file_name().map(|v| v.to_string_lossy().to_string()).unwrap_or(local_path.clone());
+                }
+            }
+
+            let _ = qt_thread.queue(move |mut controller| {
+                if controller.rust().preview_generation != preview_generation { return; }
+                controller.as_mut().set_preview_working(false);
+                controller.as_mut().set_preview_mode(QString::from(mode));
+                controller.as_mut().set_preview_status(QString::from(status));
+                controller.as_mut().set_preview_text_content(QString::from(text));
+                controller.as_mut().set_preview_image_source(QString::from(image));
+                controller.as_mut().set_preview_frames_json(QString::from(frames_json));
+                let next = (*controller.preview_result_generation()).saturating_add(1);
+                controller.as_mut().set_preview_result_generation(next);
             });
         });
     }

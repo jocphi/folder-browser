@@ -24,6 +24,7 @@ ApplicationWindow {
     property string previewTextContent: ""
     property string previewImageSource: ""
     property var previewVideoFrames: []
+    property bool previewVideoSlideshowEnabled: true
     property int previewVideoFrameIndex: 0
     property string previewStatusText: "Preview disabled"
     property string sortColumn: "name"
@@ -788,6 +789,8 @@ ApplicationWindow {
             return
         }
         previewPendingPath = String(row.path || "")
+        previewMode = "none"
+        previewStatusText = "Working on preview..."
         previewDelayTimer.restart()
     }
 
@@ -812,44 +815,14 @@ ApplicationWindow {
 
         previewPath = previewPendingPath
         let mime = String(row.mimeType || "")
-        previewStatusText = "Loading preview…"
-        previewSlideTimer.stop()
+        previewMode = "none"
+        previewStatusText = "Working on preview..."
+        previewTextContent = ""
+        previewImageSource = ""
         previewVideoFrames = []
         previewVideoFrameIndex = 0
-
-        if (mime.indexOf("image/") === 0) {
-            previewMode = "image"
-            previewImageSource = "file://" + previewPath
-            previewStatusText = String(row.name || previewPath)
-            return
-        }
-
-        if (mime.indexOf("video/") === 0) {
-            let jsonText = controller.previewVideoFrames(previewPath)
-            try {
-                previewVideoFrames = JSON.parse(String(jsonText || "[]"))
-            } catch (error) {
-                previewVideoFrames = []
-            }
-            if (previewVideoFrames.length > 0) {
-                previewMode = "video"
-                previewImageSource = "file://" + previewVideoFrames[0]
-                previewStatusText = String(row.name || previewPath) + " — video preview"
-                previewSlideTimer.restart()
-            } else {
-                clearPreview("No video preview frames")
-            }
-            return
-        }
-
-        let text = controller.previewText(previewPath)
-        if (String(text || "").length > 0) {
-            previewMode = "text"
-            previewTextContent = String(text)
-            previewStatusText = String(row.name || previewPath)
-        } else {
-            clearPreview("No preview available")
-        }
+        previewSlideTimer.stop()
+        controller.startPreview(previewPath, mime, previewVideoSlideshowEnabled)
     }
 
 
@@ -1263,6 +1236,18 @@ ApplicationWindow {
         }
     }
 
+    Shortcut {
+        sequence: "Ctrl+P"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            root.previewFilesEnabled = !root.previewFilesEnabled
+            if (root.previewFilesEnabled)
+                root.previewCurrentRow()
+            else
+                root.clearPreview("Preview disabled")
+        }
+    }
+
     FolderBrowserController {
         id: controller
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
@@ -1274,6 +1259,27 @@ ApplicationWindow {
 
     ListModel {
         id: fileModel
+    }
+
+
+    Connections {
+        target: controller
+        function onPreviewResultGenerationChanged() {
+            root.previewMode = controller.previewMode
+            root.previewStatusText = controller.previewStatus
+            root.previewTextContent = controller.previewTextContent
+            root.previewVideoFrames = []
+            try { root.previewVideoFrames = JSON.parse(String(controller.previewFramesJson || "[]")) } catch (error) { root.previewVideoFrames = [] }
+            root.previewVideoFrameIndex = 0
+            if (controller.previewImageSource.length > 0)
+                root.previewImageSource = "file://" + controller.previewImageSource
+            else
+                root.previewImageSource = ""
+            if (root.previewMode === "video" && root.previewVideoSlideshowEnabled && root.previewVideoFrames.length > 1)
+                previewSlideTimer.restart()
+            else
+                previewSlideTimer.stop()
+        }
     }
 
 
@@ -1560,6 +1566,16 @@ ApplicationWindow {
                         color: root.secondaryTextColor
                         Layout.fillWidth: true
                         elide: Text.ElideMiddle
+                    }
+
+                    CheckBox {
+                        text: "Video slideshow"
+                        visible: root.previewMode === "video" || (fileListView.currentIndex >= 0 && fileModel.count > fileListView.currentIndex && String(fileModel.get(fileListView.currentIndex).mimeType || "").indexOf("video/") === 0)
+                        checked: root.previewVideoSlideshowEnabled
+                        onToggled: {
+                            root.previewVideoSlideshowEnabled = checked
+                            root.previewCurrentRow()
+                        }
                     }
 
                     Rectangle {
