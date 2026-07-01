@@ -245,7 +245,8 @@ Rectangle {
         width: 1
         height: 1
         visible: false
-        Drag.active: rowMouseArea.drag.active
+        property bool dragActiveForExport: false
+        Drag.active: dragActiveForExport
         Drag.dragType: Drag.Automatic
         Drag.supportedActions: Qt.CopyAction
         Drag.mimeData: {
@@ -346,6 +347,7 @@ Rectangle {
 
         onPressed: function(mouse) {
             rowDelegate.rowPressed(mouse, rowDelegate.index)
+            dragProxy.dragActiveForExport = false
             dragProxy.x = 0
             dragProxy.y = 0
         }
@@ -358,17 +360,20 @@ Rectangle {
 
         onPositionChanged: function(mouse) {
             if (drag.active) {
+                dragProxy.dragActiveForExport = true
                 dragProxy.x = mouse.x
                 dragProxy.y = mouse.y
             }
         }
 
         onReleased: {
+            dragProxy.dragActiveForExport = false
             dragProxy.x = 0
             dragProxy.y = 0
         }
 
         onCanceled: {
+            dragProxy.dragActiveForExport = false
             dragProxy.x = 0
             dragProxy.y = 0
         }
