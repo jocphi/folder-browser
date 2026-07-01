@@ -184,6 +184,9 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            boundsMovement: Flickable.StopAtBounds
+            maximumFlickVelocity: 8000
             spacing: 1
             model: fileListView.fileModel
             focus: true
@@ -191,6 +194,74 @@ Rectangle {
             keyNavigationEnabled: true
             highlightMoveDuration: 80
             onCurrentIndexChanged: fileListView.currentIndex = currentIndex
+            onContentYChanged: {
+                let maxY = Math.max(0, contentHeight - height)
+                if (contentY < 0)
+                    contentY = 0
+                else if (contentY > maxY)
+                    contentY = maxY
+            }
+
+            Item {
+                id: fileListVerticalScrollBarOverlay
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.right: parent.right
+                width: 14
+                z: 80
+                visible: fileList.contentHeight > fileList.height
+
+                Rectangle {
+                    id: fileListVerticalScrollTrack
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    radius: 6
+                    color: Qt.rgba(1, 1, 1, 0.10)
+                    border.color: Qt.rgba(1, 1, 1, 0.18)
+                    border.width: 1
+                }
+
+                Rectangle {
+                    id: fileListVerticalScrollThumb
+                    width: 10
+                    x: 2
+                    radius: 5
+                    height: Math.max(34, fileListVerticalScrollBarOverlay.height * fileList.height / Math.max(1, fileList.contentHeight))
+                    y: fileList.contentHeight <= fileList.height
+                       ? 0
+                       : Math.max(0, Math.min(fileListVerticalScrollBarOverlay.height - height,
+                           (fileList.contentY / Math.max(1, fileList.contentHeight - fileList.height))
+                           * (fileListVerticalScrollBarOverlay.height - height)))
+                    color: fileListVerticalScrollMouse.pressed
+                           ? fileListView.activeSortBorderColor
+                           : (fileListVerticalScrollMouse.containsMouse
+                              ? Qt.lighter(fileListView.activeSortBorderColor, 1.18)
+                              : Qt.rgba(0.75, 0.82, 0.92, 0.72))
+                    border.color: Qt.rgba(0, 0, 0, 0.30)
+                    border.width: 1
+                }
+
+                MouseArea {
+                    id: fileListVerticalScrollMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeVerCursor
+
+                    function moveTo(localY) {
+                        let maxContentY = Math.max(0, fileList.contentHeight - fileList.height)
+                        let maxThumbY = Math.max(1, fileListVerticalScrollBarOverlay.height - fileListVerticalScrollThumb.height)
+                        let thumbY = Math.max(0, Math.min(maxThumbY, localY - fileListVerticalScrollThumb.height / 2))
+                        fileList.contentY = maxContentY * thumbY / maxThumbY
+                    }
+
+                    onPressed: function(mouse) { moveTo(mouse.y) }
+                    onPositionChanged: function(mouse) {
+                        if (pressed)
+                            moveTo(mouse.y)
+                    }
+                }
+            }
+
 
             Keys.onReturnPressed: function(event) {
                 fileListView.openCurrentRequested()
@@ -260,6 +331,7 @@ Rectangle {
                 propagateComposedEvents: true
                 z: 10
                 onWheel: function(wheel) {
+                    fileList.cancelFlick()
                     let maxY = Math.max(0, fileList.contentHeight - fileList.height)
                     let step = wheel.angleDelta.y * 3.0
                     fileList.contentY = Math.max(0, Math.min(maxY, fileList.contentY - step))
