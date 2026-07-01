@@ -15,6 +15,17 @@ ApplicationWindow {
     color: windowBackgroundColor
 
     property var allRows: []
+
+    property bool previewFilesEnabled: false
+    property real previewPaneWidth: 320
+    property string previewPendingPath: ""
+    property string previewPath: ""
+    property string previewMode: "none"
+    property string previewTextContent: ""
+    property string previewImageSource: ""
+    property var previewVideoFrames: []
+    property int previewVideoFrameIndex: 0
+    property string previewStatusText: "Preview disabled"
     property string sortColumn: "name"
     property string activeColumnProfileName: "Default"
     property var columnProfiles: ({
@@ -766,6 +777,81 @@ ApplicationWindow {
 
     function isParentEntry(row) { return row && row.isParentEntry === true }
 
+    function previewCurrentRow() {
+        if (!previewFilesEnabled)
+            return
+        if (fileListView.currentIndex < 0 || fileListView.currentIndex >= fileModel.count)
+            return
+        let row = fileModel.get(fileListView.currentIndex)
+        if (!row || root.isParentEntry(row) || row.isDir) {
+            clearPreview("No file selected")
+            return
+        }
+        previewPendingPath = String(row.path || "")
+        previewDelayTimer.restart()
+    }
+
+    function clearPreview(message) {
+        previewDelayTimer.stop()
+        previewSlideTimer.stop()
+        previewPath = ""
+        previewMode = "none"
+        previewTextContent = ""
+        previewImageSource = ""
+        previewVideoFrames = []
+        previewVideoFrameIndex = 0
+        previewStatusText = message || "No preview"
+    }
+
+    function loadPreviewForPendingPath() {
+        if (!previewFilesEnabled || previewPendingPath.length === 0)
+            return
+        let row = fileModel.get(fileListView.currentIndex)
+        if (!row || String(row.path || "") !== previewPendingPath)
+            return
+
+        previewPath = previewPendingPath
+        let mime = String(row.mimeType || "")
+        previewStatusText = "Loading preview…"
+        previewSlideTimer.stop()
+        previewVideoFrames = []
+        previewVideoFrameIndex = 0
+
+        if (mime.indexOf("image/") === 0) {
+            previewMode = "image"
+            previewImageSource = "file://" + previewPath
+            previewStatusText = String(row.name || previewPath)
+            return
+        }
+
+        if (mime.indexOf("video/") === 0) {
+            let jsonText = controller.previewVideoFrames(previewPath)
+            try {
+                previewVideoFrames = JSON.parse(String(jsonText || "[]"))
+            } catch (error) {
+                previewVideoFrames = []
+            }
+            if (previewVideoFrames.length > 0) {
+                previewMode = "video"
+                previewImageSource = "file://" + previewVideoFrames[0]
+                previewStatusText = String(row.name || previewPath) + " — video preview"
+                previewSlideTimer.restart()
+            } else {
+                clearPreview("No video preview frames")
+            }
+            return
+        }
+
+        let text = controller.previewText(previewPath)
+        if (String(text || "").length > 0) {
+            previewMode = "text"
+            previewTextContent = String(text)
+            previewStatusText = String(row.name || previewPath)
+        } else {
+            clearPreview("No preview available")
+        }
+    }
+
 
     property int pendingFocusIndexAfterRefresh: -1
     property string pendingFocusPathAfterRefresh: ""
@@ -1158,6 +1244,25 @@ ApplicationWindow {
         }
     }
 
+    Timer {
+        id: previewDelayTimer
+        interval: 750
+        repeat: false
+        onTriggered: root.loadPreviewForPendingPath()
+    }
+
+    Timer {
+        id: previewSlideTimer
+        interval: 1200
+        repeat: true
+        onTriggered: {
+            if (root.previewVideoFrames.length > 0) {
+                root.previewVideoFrameIndex = (root.previewVideoFrameIndex + 1) % root.previewVideoFrames.length
+                root.previewImageSource = "file://" + root.previewVideoFrames[root.previewVideoFrameIndex]
+            }
+        }
+    }
+
     FolderBrowserController {
         id: controller
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
@@ -1183,6 +1288,8 @@ ApplicationWindow {
         property bool sortAscending: true
         property bool showHidden: false
         property bool followSymlinks: false
+        property alias previewFilesEnabled: root.previewFilesEnabled
+        property alias previewPaneWidth: root.previewPaneWidth
         property string filterText: ""
         property string currentPath: ""
     }
@@ -1308,6 +1415,24 @@ ApplicationWindow {
             }
         }
 
+        CheckBox {
+            id: previewFilesCheckBox
+            text: "Preview files"
+            checked: root.previewFilesEnabled
+            onToggled: {
+                root.previewFilesEnabled = checked
+                if (checked)
+                    root.previewCurrentRow()
+                else
+                    root.clearPreview("Preview disabled")
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 6
+
         FileListView {
             id: fileListView
             fileModel: fileModel
@@ -1353,6 +1478,7 @@ ApplicationWindow {
             displaySizeFunction: root.displaySize
             sizeColorFunction: root.sizeColor
             modifiedTextFunction: root.modifiedText
+            onCurrentIndexChanged: root.previewCurrentRow()
             onSortRequested: function(columnName) { root.setSort(columnName) }
             onHeaderMenuRequested: function(columnName, sceneX, sceneY) { root.openHeaderMenu(columnName, sceneX, sceneY) }
             onOpenCurrentRequested: root.openCurrentRow()
@@ -1374,6 +1500,111 @@ ApplicationWindow {
             onRowPressed: function(mouse, rowIndex) { root.handleRowPress(mouse, rowIndex) }
             onRowDoubleClicked: function(rowIndex) { root.openRow(fileModel.get(rowIndex)) }
         }
+            Rectangle {
+                id: previewResizeHandle
+                visible: root.previewFilesEnabled
+                Layout.fillHeight: true
+                Layout.preferredWidth: 6
+                color: previewHandleMouse.containsMouse || previewHandleMouse.pressed ? root.activeSortBorderColor : root.panelBorderColor
+                MouseArea {
+                    id: previewHandleMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeHorCursor
+                    property real startX: 0
+                    property real startWidth: 0
+                    onPressed: {
+                        startX = mouseX
+                        startWidth = root.previewPaneWidth
+                    }
+                    onPositionChanged: {
+                        if (pressed)
+                            root.previewPaneWidth = Math.max(180, Math.min(760, startWidth - (mouseX - startX)))
+                    }
+                }
+            }
+
+            Rectangle {
+                id: previewPane
+                visible: root.previewFilesEnabled
+                Layout.fillHeight: true
+                Layout.preferredWidth: root.previewPaneWidth
+                color: root.panelBackgroundColor
+                border.color: root.panelBorderColor
+                radius: 8
+                clip: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            text: "Preview"
+                            color: root.headerTextColor
+                            font.bold: true
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                        Button {
+                            text: "×"
+                            Layout.preferredWidth: 28
+                            onClicked: root.previewFilesEnabled = false
+                        }
+                    }
+
+                    Label {
+                        text: root.previewStatusText
+                        color: root.secondaryTextColor
+                        Layout.fillWidth: true
+                        elide: Text.ElideMiddle
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: Qt.darker(root.panelBackgroundColor, 1.08)
+                        border.color: root.panelBorderColor
+                        radius: 6
+                        clip: true
+
+                        TextArea {
+                            visible: root.previewMode === "text"
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            readOnly: true
+                            selectByMouse: true
+                            wrapMode: TextEdit.NoWrap
+                            text: root.previewTextContent
+                            color: root.fileTextColor
+                            font.family: root.rowFontFamily
+                            background: Rectangle { color: "transparent" }
+                        }
+
+                        Image {
+                            visible: root.previewMode === "image" || root.previewMode === "video"
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            source: root.previewImageSource
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true
+                            cache: false
+                        }
+
+                        Label {
+                            visible: root.previewMode === "none"
+                            anchors.centerIn: parent
+                            text: root.previewStatusText
+                            color: root.secondaryTextColor
+                        }
+                    }
+                }
+            }
+
+        }
+
 
 
 

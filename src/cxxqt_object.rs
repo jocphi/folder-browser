@@ -41,6 +41,18 @@ pub mod qobject {
         fn trash_paths(self: Pin<&mut Self>, paths: &QString);
 
         #[qinvokable]
+        #[cxx_name = "trashPreviewItems"]
+        fn trash_preview_items(&self, paths: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "previewText"]
+        fn preview_text(&self, path: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "previewVideoFrames"]
+        fn preview_video_frames(&self, path: &QString) -> QString;
+
+        #[qinvokable]
         #[cxx_name = "fileName"]
         fn file_name(&self, row: i32) -> QString;
 
@@ -275,6 +287,161 @@ fn move_path_to_trash(path: &std::path::Path) -> Result<(), String> {
 }
 
 
+
+#[derive(Clone)]
+struct TrashPreviewItem {
+    path: PathBuf,
+    display_name: String,
+    size_bytes: u64,
+}
+
+fn json_escape_string(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch < ' ' => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out
+}
+
+fn trash_preview_json(items: &[TrashPreviewItem]) -> String {
+    let mut json = String::from("[");
+    for (index, item) in items.iter().enumerate() {
+        if index > 0 { json.push(','); }
+        json.push_str(&format!(
+            "{{\"checked\":true,\"path\":\"{}\",\"name\":\"{}\",\"sizeBytes\":{}}}",
+            json_escape_string(&item.path.to_string_lossy()),
+            json_escape_string(&item.display_name),
+            item.size_bytes
+        ));
+    }
+    json.push(']');
+    json
+}
+
+fn collect_trash_preview_path(path: &std::path::Path, display_name: String, items: &mut Vec<TrashPreviewItem>) {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else { return; };
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        let Ok(entries) = std::fs::read_dir(path) else { return; };
+        let mut children: Vec<std::path::PathBuf> = entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect();
+        children.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        for child in children {
+            let Some(name) = child.file_name().map(|name| name.to_string_lossy().to_string()) else { continue; };
+            collect_trash_preview_path(&child, format!("{display_name}/{name}"), items);
+        }
+    } else {
+        items.push(TrashPreviewItem {
+            path: path.to_path_buf(),
+            display_name,
+            size_bytes: metadata.len(),
+        });
+    }
+}
+
+fn trash_preview_items_for_paths(paths: &[String]) -> Vec<TrashPreviewItem> {
+    let mut items = Vec::new();
+    for raw_path in paths {
+        let raw_path = raw_path.trim();
+        if raw_path.is_empty() { continue; }
+        let path = std::path::PathBuf::from(raw_path);
+        let Ok(absolute_path) = trash_absolute_path(&path) else { continue; };
+        let Some(name) = absolute_path.file_name().map(|name| name.to_string_lossy().to_string()) else { continue; };
+        let Ok(metadata) = std::fs::symlink_metadata(&absolute_path) else { continue; };
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            collect_trash_preview_path(&absolute_path, name, &mut items);
+        } else {
+            collect_trash_preview_path(&absolute_path, format!("./{name}"), &mut items);
+        }
+    }
+    items
+}
+
+
+
+fn preview_json_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch < ' ' => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+fn preview_cache_key(path: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn preview_cache_dir_for(path: &str) -> PathBuf {
+    std::env::temp_dir().join("folder-browser-preview").join(preview_cache_key(path))
+}
+
+fn ffprobe_duration_seconds(path: &std::path::Path) -> Option<f64> {
+    let output = std::process::Command::new("ffprobe")
+        .arg("-v").arg("error")
+        .arg("-show_entries").arg("format=duration")
+        .arg("-of").arg("default=noprint_wrappers=1:nokey=1")
+        .arg(path)
+        .output()
+        .ok()?;
+    if !output.status.success() { return None; }
+    String::from_utf8_lossy(&output.stdout).trim().parse::<f64>().ok().filter(|value| *value > 0.0)
+}
+
+fn preview_video_frame_paths(path: &std::path::Path) -> Vec<PathBuf> {
+    let path_string = path.to_string_lossy().to_string();
+    let cache_dir = preview_cache_dir_for(&path_string);
+    let _ = std::fs::create_dir_all(&cache_dir);
+    let Some(duration) = ffprobe_duration_seconds(path) else { return Vec::new(); };
+    let mut frames = Vec::new();
+    for percent in 1..=9 {
+        let timestamp = duration * (percent as f64) / 10.0;
+        let output_path = cache_dir.join(format!("frame_{percent:02}.jpg"));
+        if !output_path.exists() {
+            let _ = std::process::Command::new("ffmpeg")
+                .arg("-y")
+                .arg("-hide_banner")
+                .arg("-loglevel").arg("error")
+                .arg("-ss").arg(format!("{timestamp:.3}"))
+                .arg("-i").arg(path)
+                .arg("-frames:v").arg("1")
+                .arg("-q:v").arg("3")
+                .arg(&output_path)
+                .output();
+        }
+        if output_path.exists() {
+            frames.push(output_path);
+        }
+    }
+    frames
+}
+
+fn read_text_preview(path: &std::path::Path, max_bytes: usize) -> String {
+    let Ok(bytes) = std::fs::read(path) else { return String::new(); };
+    let bytes = if bytes.len() > max_bytes { &bytes[..max_bytes] } else { &bytes[..] };
+    if bytes.iter().take(4096).any(|byte| *byte == 0) {
+        return String::new();
+    }
+    String::from_utf8_lossy(bytes).to_string()
+}
+
+
 impl qobject::FolderBrowserController {
     pub fn increment_click_count(mut self: Pin<&mut Self>) {
         let previous = *self.click_count();
@@ -306,7 +473,6 @@ impl qobject::FolderBrowserController {
 
         let count = paths.len();
         let qt_thread = self.qt_thread();
-        let current_path = self.current_path().clone();
         self.as_mut().set_status_text(QString::from(format!("Moving {count} item(s) to Trash…")));
 
         std::thread::spawn(move || {
@@ -317,19 +483,60 @@ impl qobject::FolderBrowserController {
                 }
             }
             let _ = qt_thread.queue(move |mut controller| {
-                if errors.is_empty() {
+                let error_count = errors.len();
+                let moved_count = count.saturating_sub(error_count);
+                if error_count == 0 {
                     controller.as_mut().set_status_text(QString::from(format!("Moved {count} item(s) to Trash")));
                 } else {
                     controller.as_mut().set_status_text(QString::from(format!(
-                        "Moved {} / {count} item(s) to Trash; {} error(s)",
-                        count.saturating_sub(errors.len()),
-                        errors.len()
+                        "Moved {moved_count} / {count} item(s) to Trash; {error_count} error(s)"
                     )));
                 }
-                controller.as_mut().scan_path(&current_path);
+
+                if moved_count > 0 {
+                    let requested_paths: std::collections::HashSet<PathBuf> = paths
+                        .iter()
+                        .map(PathBuf::from)
+                        .collect();
+                    let rows = &mut controller.as_mut().rust_mut().rows;
+                    rows.retain(|row| !requested_paths.contains(&row.path));
+                    let row_count = rows.len().min(i32::MAX as usize) as i32;
+                    controller.as_mut().set_row_count(row_count);
+                    bump_update_generation(controller.as_mut());
+                }
             });
         });
     }
+
+    pub fn preview_text(&self, path: &QString) -> QString {
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        QString::from(read_text_preview(std::path::Path::new(&local_path), 512 * 1024))
+    }
+
+    pub fn preview_video_frames(&self, path: &QString) -> QString {
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        let frames = preview_video_frame_paths(std::path::Path::new(&local_path));
+        let mut json = String::from("[");
+        for (index, frame) in frames.iter().enumerate() {
+            if index > 0 { json.push(','); }
+            json.push_str(&format!("\"{}\"", preview_json_escape(&frame.to_string_lossy())));
+        }
+        json.push(']');
+        QString::from(json)
+    }
+
+    pub fn trash_preview_items(&self, paths: &QString) -> QString {
+        let paths: Vec<String> = paths
+            .to_string()
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect();
+        QString::from(trash_preview_json(&trash_preview_items_for_paths(&paths)))
+    }
+
 
             pub fn scan_path(mut self: Pin<&mut Self>, path: &QString) {
         let qt_thread = self.qt_thread();
