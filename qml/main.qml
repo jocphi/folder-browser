@@ -31,6 +31,8 @@ ApplicationWindow {
     property string sortColumn: "name"
     property string activeColumnProfileName: "Default"
     property string browserSource: "Filesystem"
+    property string lastFilesystemPath: ""
+    property string lastDatabasePath: ""
     property var columnProfiles: ({
         "Default": [
             ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
@@ -1468,13 +1470,48 @@ ApplicationWindow {
     }
 
 
+
+    function rememberCurrentSourcePath() {
+        let current = String(controller.currentPath || "")
+        if (current.length <= 0)
+            return
+        if (root.browserSource === "Database")
+            root.lastDatabasePath = current
+        else
+            root.lastFilesystemPath = current
+    }
+
+    function setBrowserSource(value) {
+        value = String(value || "Filesystem")
+        if (value !== "Database")
+            value = "Filesystem"
+        if (root.browserSource === value)
+            return
+
+        root.rememberCurrentSourcePath()
+        root.browserSource = value
+
+        let targetPath = ""
+        if (root.browserSource === "Database")
+            targetPath = root.lastDatabasePath.length > 0 ? root.lastDatabasePath : String(controller.currentPath || "")
+        else
+            targetPath = root.lastFilesystemPath.length > 0 ? root.lastFilesystemPath : String(controller.currentPath || "")
+
+        if (targetPath.length > 0)
+            root.scanPath(targetPath)
+    }
+
     function scanControllerPath(pathText) {
+        pathText = String(pathText || "")
         if (root.browserSource === "Database") {
+            root.lastDatabasePath = pathText
             controller.scanDatabasePath(pathText)
         } else {
+            root.lastFilesystemPath = pathText
             controller.scanPath(pathText)
         }
     }
+
 
     FolderBrowserController {
         id: controller
@@ -1640,11 +1677,7 @@ ApplicationWindow {
                 currentIndex: Math.max(0, model.indexOf(root.browserSource))
                 Layout.preferredWidth: 140
                 onActivated: function(index) {
-                    let value = String(model[index] || "Filesystem")
-                    if (root.browserSource !== value) {
-                        root.browserSource = value
-                        root.scanPath(controller.currentPath)
-                    }
+                    root.setBrowserSource(String(model[index] || "Filesystem"))
                 }
             }
 
