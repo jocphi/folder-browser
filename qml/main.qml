@@ -30,6 +30,7 @@ ApplicationWindow {
     property string previewStatusText: "Preview disabled"
     property string sortColumn: "name"
     property string activeColumnProfileName: "Default"
+    property string browserSource: "Filesystem"
     property var columnProfiles: ({
         "Default": [
             ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
@@ -1077,7 +1078,7 @@ ApplicationWindow {
     function scanPath(pathText) {
         pathBar.pathText = String(pathText);
         controller.followSymlinks = root.followSymlinks
-        controller.scanPath(pathBar.pathText);
+        root.scanControllerPath(pathBar.pathText);
         uiSettings.currentPath = pathBar.pathText
         selectedPaths = [];
         lastSelectedIndex = -1;
@@ -1466,6 +1467,15 @@ ApplicationWindow {
         return controller.isScanning ? "File analysis running" : "File analysis finished"
     }
 
+
+    function scanControllerPath(pathText) {
+        if (root.browserSource === "Database") {
+            controller.scanDatabasePath(pathText)
+        } else {
+            controller.scanPath(pathText)
+        }
+    }
+
     FolderBrowserController {
         id: controller
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
@@ -1519,6 +1529,7 @@ ApplicationWindow {
         property alias previewPaneWidth: root.previewPaneWidth
         property string filterText: ""
         property string currentPath: ""
+        property string browserSource: "Filesystem"
     }
 
     Settings {
@@ -1614,6 +1625,28 @@ ApplicationWindow {
             id: columnProfileBar
             Layout.fillWidth: true
             spacing: 8
+
+
+            Label {
+                text: "Source"
+                color: root.secondaryTextColor
+                font.family: root.rowFontFamily
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            ComboBox {
+                id: browserSourceComboBox
+                model: ["Filesystem", "Database"]
+                currentIndex: Math.max(0, model.indexOf(root.browserSource))
+                Layout.preferredWidth: 140
+                onActivated: function(index) {
+                    let value = String(model[index] || "Filesystem")
+                    if (root.browserSource !== value) {
+                        root.browserSource = value
+                        root.scanPath(controller.currentPath)
+                    }
+                }
+            }
 
             Label {
                 text: "Column profile"
