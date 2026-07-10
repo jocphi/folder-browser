@@ -27,6 +27,9 @@ ApplicationWindow {
     property var treeCachedCounts: ({})
     property var treeCountQueue: []
     property var treeCountQueued: ({})
+    property int treeCountGeneration: 0
+    property string treeLastRebuildPath: ""
+    property int treeLastRebuildControllerRowCount: -1
     property string previewPendingPath: ""
     property string previewPath: ""
     property string previewMode: "none"
@@ -1657,6 +1660,28 @@ ApplicationWindow {
             treeCountTimer.restart()
     }
 
+    function treeApplyWorkerCountResult(jsonText) {
+        let result = null
+        try {
+            result = JSON.parse(String(jsonText || "{}"))
+        } catch (error) {
+            console.log("Could not parse tree count result: " + error)
+            return
+        }
+        let pathText = root.normalizeTreePath(result.path || "")
+        if (pathText.length <= 0)
+            return
+        let count = ({
+            directFileCount: Number(result.directFiles ?? -1),
+            recursiveFileCount: Number(result.recursiveFiles ?? -1),
+            directFolderCount: Number(result.directFolders ?? -1),
+            recursiveFolderCount: Number(result.recursiveFolders ?? -1),
+            countsDone: Boolean(result.done),
+            countsScanning: !Boolean(result.done)
+        })
+        root.treeSetCachedCount(pathText, count)
+    }
+
     function treeProcessNextCount() {
         let queue = root.treeCountQueue.slice()
         if (queue.length <= 0)
@@ -1668,16 +1693,17 @@ ApplicationWindow {
         root.treeCountQueue = queue
 
         let direct = root.treeCachedCountForPath(pathText)
-        let recursive = root.treeComputeKnownRecursiveCounts(pathText, ({}))
-        let count = ({
+        root.treeSetCachedCount(pathText, ({
             directFileCount: Number(direct.directFileCount ?? -1),
-            recursiveFileCount: recursive.complete ? Math.max(0, recursive.files - Math.max(0, Number(direct.directFileCount || 0))) : -1,
+            recursiveFileCount: Number(direct.recursiveFileCount ?? -1),
             directFolderCount: Number(direct.directFolderCount ?? -1),
-            recursiveFolderCount: recursive.complete ? Math.max(0, recursive.folders - Math.max(0, Number(direct.directFolderCount || 0))) : -1,
-            countsDone: Boolean(recursive.complete),
-            countsScanning: !recursive.complete
-        })
-        root.treeSetCachedCount(pathText, count)
+            recursiveFolderCount: Number(direct.recursiveFolderCount ?? -1),
+            countsDone: false,
+            countsScanning: true
+        }))
+
+        root.treeCountGeneration = root.treeCountGeneration + 1
+        controller.startTreeCount(pathText, root.treeCountGeneration)
 
         if (root.treeCountQueue.length > 0)
             treeCountTimer.restart()
@@ -1841,6 +1867,16 @@ ApplicationWindow {
         }
     }
 
+    function rebuildTreeModelIfNeeded(force) {
+        let currentPath = root.normalizeTreePath(controller.currentPath)
+        let controllerRows = Number(controller.rowCount || 0)
+        if (!force && currentPath === root.treeLastRebuildPath && controllerRows === root.treeLastRebuildControllerRowCount)
+            return
+        root.treeLastRebuildPath = currentPath
+        root.treeLastRebuildControllerRowCount = controllerRows
+        root.rebuildTreeModel()
+    }
+
     function rebuildTreeModel() {
         if (!treeModel)
             return
@@ -1862,7 +1898,7 @@ ApplicationWindow {
         updateGeneration: 0
         onUpdateGenerationChanged: {
             rebuildRowsFromController()
-            root.rebuildTreeModel()
+            root.rebuildTreeModelIfNeeded(false)
         }
     }
 
@@ -1897,7 +1933,11 @@ ApplicationWindow {
             else
                 previewSlideTimer.stop()
         }
-    }
+    
+        function onTreeCountResultGenerationChanged() {
+            root.treeApplyWorkerCountResult(controller.treeCountResultJson)
+        }
+}
 
 
     Settings {
@@ -1980,6 +2020,7 @@ ApplicationWindow {
         loadInterfaceSettings()
         normalizeSidePaneSettings()
         scanPath(savedStartupPath.length > 0 ? savedStartupPath : controller.currentPath)
+        root.rebuildTreeModelIfNeeded(true)
     }
 
     Component.onDestruction: controller.cleanupPreviewCache()
@@ -2241,17 +2282,120 @@ ApplicationWindow {
                                 }
                             }
 
-                            ListView {
+                            Flickable {
                                 id: treeListView
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 clip: true
-                                model: treeModel
                                 boundsBehavior: Flickable.StopAtBounds
+                                boundsMovement: Flickable.StopAtBounds
+                                contentWidth: width
+                                contentHeight: treeRowsColumn.implicitHeight
 
+                                function cancelFlick() {
+                                    // Compatibility shim: this tree used to be a ListView.
+                                    // Flickable has no cancelFlick() method, but callers can safely invoke this no-op.
+                                }
 
-                                MouseArea {
+                                function positionViewAtIndex(index, mode) {
+                                    if (index < 0 || index >= treeModel.count)
+                                        return
+                                    let rowY = index * 26
+                                    let maxY = Math.max(0, contentHeight - height)
+                                    if (rowY < contentY)
+                                        contentY = Math.max(0, rowY)
+                                    else if (rowY + 26 > contentY + height)
+                                        contentY = Math.min(maxY, rowY + 26 - height)
+                                }
 
+                                onContentYChanged: {
+                                    let maxY = Math.max(0, contentHeight - height)
+                                    if (contentY < 0)
+                                        contentY = 0
+                                    else if (contentY > maxY)
+                                        contentY = maxY
+                                }
+                                onContentHeightChanged: {
+                                    let maxY = Math.max(0, contentHeight - height)
+                                    if (contentY > maxY)
+                                        contentY = maxY
+                                }
+                                onHeightChanged: {
+                                    let maxY = Math.max(0, contentHeight - height)
+                                    if (contentY > maxY)
+                                        contentY = maxY
+                                }
+
+                                Column {
+                                    id: treeRowsColumn
+                                    width: treeListView.width
+                                    spacing: 0
+
+                                    Repeater {
+                                        model: treeModel
+
+                                        delegate: Rectangle {
+                                            width: treeRowsColumn.width
+                                            height: 26
+                                            radius: 4
+                                            color: model.current
+                                                   ? root.keyboardCurrentRowColor
+                                                   : (model.branch ? Qt.rgba(0.25, 0.32, 0.42, 0.35)
+                                                                   : (treeRowMouse.containsMouse ? root.activeSortColumnColor : "transparent"))
+                                            border.color: model.current ? root.activeSortBorderColor : "transparent"
+                                            border.width: model.current ? 1 : 0
+
+                                            Row {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 16
+                                                spacing: 6
+
+                                                Item {
+                                                    width: Math.max(0, Number(model.depth || 0)) * 14
+                                                    height: parent.height
+                                                }
+
+                                                Label {
+                                                    width: 18
+                                                    text: model.branch ? "▾" : "▸"
+                                                    color: root.secondaryTextColor
+                                                    font.family: root.rowFontFamily
+                                                    verticalAlignment: Text.AlignVCenter
+                                                }
+
+                                                Label {
+                                                    text: model.name
+                                                    color: model.current ? root.fileTextColor : root.folderTextColor
+                                                    font.family: root.rowFontFamily
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    elide: Text.ElideMiddle
+                                                    width: Math.max(40, treeListView.width - (Number(model.depth || 0) * 14) - 220)
+                                                }
+
+                                                Label {
+                                                    text: root.treeCountSummary(model.directFileCount,
+                                                                                model.recursiveFileCount,
+                                                                                model.directFolderCount,
+                                                                                model.recursiveFolderCount)
+                                                    color: root.treeCountColor(Boolean(model.countsDone))
+                                                    font.family: root.rowFontFamily
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    width: 170
+                                                    horizontalAlignment: Text.AlignRight
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                id: treeRowMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: root.scanPath(model.path)
+                                            }
+                                        }
+                                    }
+                                }
 
                                 Item {
                                     id: treeVerticalScrollBarOverlay
@@ -2299,7 +2443,6 @@ ApplicationWindow {
                                         cursorShape: Qt.SizeVerCursor
 
                                         function moveTo(localY) {
-                                            treeListView.cancelFlick()
                                             let maxContentY = Math.max(0, treeListView.contentHeight - treeListView.height)
                                             let maxThumbY = Math.max(1, treeVerticalScrollBarOverlay.height - treeVerticalScrollThumb.height)
                                             let thumbY = Math.max(0, Math.min(maxThumbY, localY - treeVerticalScrollThumb.height / 2))
@@ -2313,6 +2456,8 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+
+                                MouseArea {
                                     id: treeWheelMouseArea
                                     anchors.fill: parent
                                     acceptedButtons: Qt.NoButton
@@ -2320,71 +2465,10 @@ ApplicationWindow {
                                     propagateComposedEvents: true
                                     z: 10
                                     onWheel: function(wheel) {
-                                        treeListView.cancelFlick()
                                         let maxY = Math.max(0, treeListView.contentHeight - treeListView.height)
                                         let step = wheel.angleDelta.y * 3.0
                                         treeListView.contentY = Math.max(0, Math.min(maxY, treeListView.contentY - step))
                                         wheel.accepted = true
-                                    }
-                                }
-
-                                delegate: Rectangle {
-                                    width: treeListView.width
-                                    height: 26
-                                    radius: 4
-                                    color: model.current
-                                           ? root.keyboardCurrentRowColor
-                                           : (model.branch ? Qt.rgba(0.25, 0.32, 0.42, 0.35)
-                                                           : (treeRowMouse.containsMouse ? root.activeSortColumnColor : "transparent"))
-                                    border.color: model.current ? root.activeSortBorderColor : "transparent"
-                                    border.width: model.current ? 1 : 0
-
-                                    Row {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 8
-                                        spacing: 6
-
-                                        Item {
-                                            width: Math.max(0, Number(model.depth || 0)) * 14
-                                            height: parent.height
-                                        }
-
-                                        Label {
-                                            width: 18
-                                            text: model.branch ? "▾" : "▸"
-                                            color: root.secondaryTextColor
-                                            font.family: root.rowFontFamily
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
-
-                                        Label {
-                                            text: model.name
-                                            color: model.current ? root.fileTextColor : root.folderTextColor
-                                            font.family: root.rowFontFamily
-                                            verticalAlignment: Text.AlignVCenter
-                                            elide: Text.ElideMiddle
-                                            width: Math.max(40, treeListView.width - (Number(model.depth || 0) * 14) - 220)
-                                        }
-
-                                        Label {
-                                            text: root.treeCountSummary(model.directFileCount,
-                                                                        model.recursiveFileCount,
-                                                                        model.directFolderCount,
-                                                                        model.recursiveFolderCount)
-                                            color: root.treeCountColor(Boolean(model.countsDone))
-                                            font.family: root.rowFontFamily
-                                            verticalAlignment: Text.AlignVCenter
-                                            width: 170
-                                            horizontalAlignment: Text.AlignRight
-                                            elide: Text.ElideRight
-                                        }                                    }
-
-                                    MouseArea {
-                                        id: treeRowMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        onClicked: root.scanPath(model.path)
                                     }
                                 }
                             }

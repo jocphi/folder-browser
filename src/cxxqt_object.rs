@@ -19,6 +19,8 @@ pub mod qobject {
         #[qproperty(i32, update_generation, cxx_name = "updateGeneration")]
         #[qproperty(bool, follow_symlinks, cxx_name = "followSymlinks")]
         #[qproperty(bool, is_scanning, cxx_name = "isScanning")]
+        #[qproperty(i32, tree_count_result_generation, cxx_name = "treeCountResultGeneration")]
+        #[qproperty(QString, tree_count_result_json, cxx_name = "treeCountResultJson")]
         #[qproperty(i32, size_scan_done, cxx_name = "sizeScanDone")]
         #[qproperty(i32, size_scan_total, cxx_name = "sizeScanTotal")]
         #[qproperty(i32, preview_result_generation, cxx_name = "previewResultGeneration")]
@@ -70,6 +72,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "startPreview"]
         fn start_preview(self: Pin<&mut Self>, path: &QString, mime: &QString, slideshow: bool);
+
+        #[qinvokable]
+        #[cxx_name = "startTreeCount"]
+        fn start_tree_count(self: Pin<&mut Self>, path: &QString, generation: i32);
 
         #[qinvokable]
         #[cxx_name = "fileName"]
@@ -162,6 +168,7 @@ use crate::database_browser::scan_database_directory;
 use crate::signals::bump_update_generation;
 use crate::media_metadata::{apply_media_metadata, is_media_path, mark_media_metadata_unavailable, probe_media_metadata};
 use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
+use crate::tree_count_worker::{count_tree_path, tree_count_json};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -174,6 +181,8 @@ pub struct FolderBrowserControllerRust {
     update_generation: i32,
     follow_symlinks: bool,
     is_scanning: bool,
+    tree_count_result_generation: i32,
+    tree_count_result_json: QString,
     size_scan_done: i32,
     size_scan_total: i32,
     preview_result_generation: i32,
@@ -556,6 +565,23 @@ impl qobject::FolderBrowserController {
                     controller.as_mut().set_row_count(row_count);
                     bump_update_generation(controller.as_mut());
                 }
+            });
+        });
+    }
+
+
+    pub fn start_tree_count(mut self: Pin<&mut Self>, path: &QString, generation: i32) {
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        let follow_symlinks = *self.follow_symlinks();
+        let qt_thread = self.qt_thread();
+
+        std::thread::spawn(move || {
+            let result = count_tree_path(std::path::Path::new(&local_path), follow_symlinks);
+            let json = tree_count_json(&result);
+            let _ = qt_thread.queue(move |mut controller| {
+                controller.as_mut().set_tree_count_result_json(QString::from(json));
+                controller.as_mut().set_tree_count_result_generation(generation);
             });
         });
     }

@@ -11,6 +11,7 @@ pub mod file_row;
 pub mod scanner;
 mod database_browser;
 pub mod dir_size_worker;
+mod tree_count_worker;
 pub mod signals;
 pub mod controller_accessors;
 pub mod cxxqt_object;
