@@ -21,6 +21,8 @@ pub mod qobject {
         #[qproperty(bool, is_scanning, cxx_name = "isScanning")]
         #[qproperty(i32, tree_count_result_generation, cxx_name = "treeCountResultGeneration")]
         #[qproperty(QString, tree_count_result_json, cxx_name = "treeCountResultJson")]
+        #[qproperty(i32, live_check_result_generation, cxx_name = "liveCheckResultGeneration")]
+        #[qproperty(QString, live_check_result_json, cxx_name = "liveCheckResultJson")]
         #[qproperty(i32, size_scan_done, cxx_name = "sizeScanDone")]
         #[qproperty(i32, size_scan_total, cxx_name = "sizeScanTotal")]
         #[qproperty(i32, preview_result_generation, cxx_name = "previewResultGeneration")]
@@ -76,6 +78,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "startTreeCount"]
         fn start_tree_count(self: Pin<&mut Self>, path: &QString, generation: i32, source: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "startLiveCheck"]
+        fn start_live_check(self: Pin<&mut Self>, source: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "pathLiveStatus"]
+        fn path_live_status(&self, path: &QString, source: &QString) -> QString;
 
         #[qinvokable]
         #[cxx_name = "fileName"]
@@ -187,6 +197,8 @@ pub struct FolderBrowserControllerRust {
     is_scanning: bool,
     tree_count_result_generation: i32,
     tree_count_result_json: QString,
+    live_check_result_generation: i32,
+    live_check_result_json: QString,
     size_scan_done: i32,
     size_scan_total: i32,
     preview_result_generation: i32,
@@ -199,6 +211,7 @@ pub struct FolderBrowserControllerRust {
     pub(crate) rows: Vec<FileRow>,
     pub(crate) scan_generation: u64,
     pub(crate) preview_generation: u64,
+    pub(crate) live_check_generation: u64,
 }
 
 
@@ -422,6 +435,34 @@ fn preview_json_escape(value: &str) -> String {
     escaped
 }
 
+
+fn parse_live_check_result_for_rows(json: &str) -> Result<Vec<(usize, PathBuf, String)>, ()> {
+    // Tiny purpose-built parser for the JSON generated in start_live_check().
+    // It intentionally avoids adding a serde dependency to this small Qt bridge.
+    let mut out = Vec::new();
+    for item in json.split("},{") {
+        let trimmed = item.trim_matches(|ch| matches!(ch, '[' | ']' | '{' | '}'));
+        let mut index: Option<usize> = None;
+        let mut path: Option<String> = None;
+        let mut status: Option<String> = None;
+        for field in trimmed.split(',') {
+            let Some((key, value)) = field.split_once(':') else { continue; };
+            let key = key.trim().trim_matches('"');
+            let value = value.trim().trim_matches('"').replace("\\\"", "\"").replace("\\\\", "\\");
+            match key {
+                "index" => index = value.parse::<usize>().ok(),
+                "path" => path = Some(value),
+                "status" => status = Some(value),
+                _ => {}
+            }
+        }
+        if let (Some(index), Some(path), Some(status)) = (index, path, status) {
+            out.push((index, PathBuf::from(path), status));
+        }
+    }
+    Ok(out)
+}
+
 fn preview_cache_key(path: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -574,7 +615,93 @@ impl qobject::FolderBrowserController {
     }
 
 
-    pub fn start_tree_count(mut self: Pin<&mut Self>, path: &QString, generation: i32, source: &QString) {
+
+
+    pub fn path_live_status(&self, path: &QString, source: &QString) -> QString {
+        let source = source.to_string();
+        if source != "Database" {
+            return QString::from("live");
+        }
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        if std::fs::symlink_metadata(&local_path).is_ok() {
+            QString::from("live")
+        } else {
+            QString::from("offline")
+        }
+    }
+
+    pub fn start_live_check(mut self: Pin<&mut Self>, source: &QString) {
+        let source = source.to_string();
+        let next_generation = self.rust().live_check_generation.wrapping_add(1);
+        self.as_mut().rust_mut().live_check_generation = next_generation;
+        let generation = next_generation;
+
+        let jobs: Vec<(usize, PathBuf)> = self
+            .rust()
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.name != "..")
+            .map(|(index, row)| (index, row.path.clone()))
+            .collect();
+
+        if jobs.is_empty() {
+            self.as_mut().set_live_check_result_json(QString::from("[]"));
+            let next = (*self.live_check_result_generation()).saturating_add(1);
+            self.as_mut().set_live_check_result_generation(next);
+            return;
+        }
+
+        let qt_thread = self.qt_thread();
+        std::thread::spawn(move || {
+            let mut json = String::from("[");
+            for (item_index, (index, path)) in jobs.into_iter().enumerate() {
+                let status = if source == "Database" {
+                    if std::fs::symlink_metadata(&path).is_ok() { "live" } else { "offline" }
+                } else {
+                    "live"
+                };
+                if item_index > 0 {
+                    json.push(',');
+                }
+                json.push_str(&format!(
+                    "{{\"index\":{},\"path\":\"{}\",\"status\":\"{}\"}}",
+                    index,
+                    preview_json_escape(&path.to_string_lossy()),
+                    status
+                ));
+            }
+            json.push(']');
+
+            let _ = qt_thread.queue(move |mut controller| {
+                if controller.rust().live_check_generation != generation {
+                    return;
+                }
+
+                // Keep the Rust-side rows in sync for future consumers, but let QML update
+                // the visible ListModel directly from the result JSON. This avoids relying
+                // on another update_generation roundtrip just to repaint the Live column.
+                if let Ok(parsed_updates) = parse_live_check_result_for_rows(&json) {
+                    let rows = &mut controller.as_mut().rust_mut().rows;
+                    for (index, path, status) in parsed_updates {
+                        if let Some(row) = rows.get_mut(index) {
+                            if row.path == path {
+                                row.live_status = status;
+                            }
+                        }
+                    }
+                }
+
+                controller.as_mut().set_live_check_result_json(QString::from(json));
+                let next = (*controller.live_check_result_generation()).saturating_add(1);
+                controller.as_mut().set_live_check_result_generation(next);
+            });
+        });
+    }
+
+
+    pub fn start_tree_count(self: Pin<&mut Self>, path: &QString, generation: i32, source: &QString) {
         let raw_path = path.to_string();
         let local_path = normalize_local_path(&raw_path);
         let source = source.to_string();

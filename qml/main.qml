@@ -29,6 +29,13 @@ ApplicationWindow {
     property var treeCountQueued: ({})
     property int treeCountGeneration: 0
     property string treeLastRebuildPath: ""
+    property string liveCheckLastSource: ""
+    property string liveCheckLastPath: ""
+    property int liveCheckLastRowCount: -1
+    property int liveStatusCheckIndex: 0
+    property string liveStatusCheckSource: ""
+    property string liveStatusCheckPath: ""
+    property int liveStatusCheckRowCount: -1
     property int treeLastRebuildControllerRowCount: -1
     property string previewPendingPath: ""
     property string previewPath: ""
@@ -1519,6 +1526,9 @@ ApplicationWindow {
 
         root.rememberCurrentSourcePath()
         root.browserSource = value
+        root.liveCheckLastSource = ""
+        root.liveCheckLastPath = ""
+        root.liveCheckLastRowCount = -1
 
         let targetPath = ""
         if (root.browserSource === "Database")
@@ -1535,9 +1545,19 @@ ApplicationWindow {
         if (root.browserSource === "Database") {
             root.lastDatabasePath = pathText
             controller.scanDatabasePath(pathText)
+            // scanDatabasePath is synchronous and fills controller.rows immediately.
+            // Force a live/offline check after the QML model has had a chance to rebuild.
+            root.liveCheckLastSource = ""
+            root.liveCheckLastPath = ""
+            root.liveCheckLastRowCount = -1
+            Qt.callLater(function() { root.startLiveCheckIfNeeded(true); root.startVisibleLiveStatusCheck(true) })
         } else {
             root.lastFilesystemPath = pathText
             controller.scanPath(pathText)
+            root.liveCheckLastSource = ""
+            root.liveCheckLastPath = ""
+            root.liveCheckLastRowCount = -1
+            Qt.callLater(function() { root.startLiveCheckIfNeeded(true); root.startVisibleLiveStatusCheck(true) })
         }
     }
 
@@ -1873,6 +1893,132 @@ ApplicationWindow {
         }
     }
 
+    function applyLiveCheckResults(jsonText) {
+        let updates = []
+        try {
+            updates = JSON.parse(String(jsonText || "[]"))
+        } catch (error) {
+            console.log("Could not parse live check result: " + error)
+            return
+        }
+        if (!updates || updates.length === undefined)
+            return
+
+        let byPath = ({})
+        for (let i = 0; i < updates.length; i += 1) {
+            let item = updates[i]
+            let path = String(item.path || "")
+            let status = String(item.status || "unknown")
+            if (path.length > 0)
+                byPath[path] = status
+            let index = Number(item.index)
+            if (Number.isFinite(index) && index >= 0 && index < fileModel.count) {
+                let row = fileModel.get(index)
+                if (String(row.path || "") === path)
+                    fileModel.setProperty(index, "liveStatus", status)
+            }
+        }
+
+        let changedRows = false
+        let rows = root.allRows.slice()
+        for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+            let row = rows[rowIndex]
+            let path = String(row.path || "")
+            if (byPath[path] !== undefined && row.liveStatus !== byPath[path]) {
+                row.liveStatus = byPath[path]
+                rows[rowIndex] = row
+            }
+        }
+        root.allRows = rows
+    }
+
+    function resetLiveCheckState() {
+        root.liveStatusCheckIndex = 0
+        root.liveStatusCheckSource = String(root.browserSource || "Filesystem")
+        root.liveStatusCheckPath = String(controller.currentPath || "")
+        root.liveStatusCheckRowCount = fileModel.count
+    }
+
+    function setVisibleRowLiveStatus(rowIndex, status) {
+        if (rowIndex < 0 || rowIndex >= fileModel.count)
+            return
+        let row = fileModel.get(rowIndex)
+        if (!row)
+            return
+        status = String(status || "unknown")
+        let path = String(row.path || "")
+        fileModel.setProperty(rowIndex, "liveStatus", status)
+
+        let rows = root.allRows.slice()
+        for (let index = 0; index < rows.length; index += 1) {
+            if (String(rows[index].path || "") === path) {
+                rows[index].liveStatus = status
+                break
+            }
+        }
+        root.allRows = rows
+    }
+
+    function startVisibleLiveStatusCheck(force) {
+        if (!force
+                && root.liveStatusCheckSource === String(root.browserSource || "Filesystem")
+                && root.liveStatusCheckPath === String(controller.currentPath || "")
+                && root.liveStatusCheckRowCount === fileModel.count
+                && liveStatusTimer.running) {
+            return
+        }
+        root.resetLiveCheckState()
+        if (fileModel.count <= 0)
+            return
+        liveStatusTimer.restart()
+    }
+
+    function processVisibleLiveStatusBatch() {
+        if (root.liveStatusCheckSource !== String(root.browserSource || "Filesystem")
+                || root.liveStatusCheckPath !== String(controller.currentPath || "")
+                || root.liveStatusCheckRowCount !== fileModel.count) {
+            liveStatusTimer.stop()
+            return
+        }
+
+        let processed = 0
+        while (root.liveStatusCheckIndex < fileModel.count && processed < 24) {
+            let index = root.liveStatusCheckIndex
+            root.liveStatusCheckIndex += 1
+            processed += 1
+
+            let row = fileModel.get(index)
+            if (!row)
+                continue
+            if (String(row.name || "") === "..") {
+                root.setVisibleRowLiveStatus(index, "live")
+                continue
+            }
+
+            let status = controller.pathLiveStatus(String(row.path || ""), root.browserSource)
+            root.setVisibleRowLiveStatus(index, status)
+        }
+
+        if (root.liveStatusCheckIndex >= fileModel.count)
+            liveStatusTimer.stop()
+    }
+
+    function startLiveCheckIfNeeded(force) {
+        let source = String(root.browserSource || "Filesystem")
+        let currentPath = String(controller.currentPath || "")
+        let rowCount = Number(controller.rowCount || 0)
+        if (!force
+                && source === root.liveCheckLastSource
+                && currentPath === root.liveCheckLastPath
+                && rowCount === root.liveCheckLastRowCount) {
+            return
+        }
+        root.liveCheckLastSource = source
+        root.liveCheckLastPath = currentPath
+        root.liveCheckLastRowCount = rowCount
+        controller.startLiveCheck(source)
+    }
+
     function rebuildTreeModelIfNeeded(force) {
         let currentPath = root.normalizeTreePath(controller.currentPath)
         let controllerRows = Number(controller.rowCount || 0)
@@ -1905,6 +2051,8 @@ ApplicationWindow {
         onUpdateGenerationChanged: {
             rebuildRowsFromController()
             root.rebuildTreeModelIfNeeded(false)
+            root.startLiveCheckIfNeeded(false)
+            root.startVisibleLiveStatusCheck(true)
         }
     }
 
@@ -1942,6 +2090,10 @@ ApplicationWindow {
     
         function onTreeCountResultGenerationChanged() {
             root.treeApplyWorkerCountResult(controller.treeCountResultJson)
+        }
+
+        function onLiveCheckResultGenerationChanged() {
+            root.applyLiveCheckResults(controller.liveCheckResultJson)
         }
 }
 
@@ -1996,6 +2148,13 @@ ApplicationWindow {
         property string sizeErrorColor: "#ef4444"
     }
 
+
+    Timer {
+        id: liveStatusTimer
+        interval: 10
+        repeat: true
+        onTriggered: root.processVisibleLiveStatusBatch()
+    }
 
     Timer {
         id: treeCountTimer
