@@ -1703,7 +1703,7 @@ ApplicationWindow {
         }))
 
         root.treeCountGeneration = root.treeCountGeneration + 1
-        controller.startTreeCount(pathText, root.treeCountGeneration)
+        controller.startTreeCount(pathText, root.treeCountGeneration, root.browserSource)
 
         if (root.treeCountQueue.length > 0)
             treeCountTimer.restart()

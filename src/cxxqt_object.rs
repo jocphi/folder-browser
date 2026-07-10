@@ -75,7 +75,7 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "startTreeCount"]
-        fn start_tree_count(self: Pin<&mut Self>, path: &QString, generation: i32);
+        fn start_tree_count(self: Pin<&mut Self>, path: &QString, generation: i32, source: &QString);
 
         #[qinvokable]
         #[cxx_name = "fileName"]
@@ -164,7 +164,7 @@ use crate::formatting::normalize_local_path;
 use crate::file_row::FileRow;
 use crate::file_size_status::{DirectorySizeStatusUpdate, SizeStatus};
 use crate::scanner::{probe_mime_type, scan_directory};
-use crate::database_browser::scan_database_directory;
+use crate::database_browser::{scan_database_directory, count_database_tree_path};
 use crate::signals::bump_update_generation;
 use crate::media_metadata::{apply_media_metadata, is_media_path, mark_media_metadata_unavailable, probe_media_metadata};
 use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
@@ -570,14 +570,23 @@ impl qobject::FolderBrowserController {
     }
 
 
-    pub fn start_tree_count(mut self: Pin<&mut Self>, path: &QString, generation: i32) {
+    pub fn start_tree_count(mut self: Pin<&mut Self>, path: &QString, generation: i32, source: &QString) {
         let raw_path = path.to_string();
         let local_path = normalize_local_path(&raw_path);
+        let source = source.to_string();
         let follow_symlinks = *self.follow_symlinks();
         let qt_thread = self.qt_thread();
 
         std::thread::spawn(move || {
-            let result = count_tree_path(std::path::Path::new(&local_path), follow_symlinks);
+            let result = if source == "Database" {
+                count_database_tree_path(&local_path).unwrap_or_else(|_| crate::tree_count_worker::TreeCountResult {
+                    path: local_path.clone(),
+                    complete: false,
+                    ..crate::tree_count_worker::TreeCountResult::default()
+                })
+            } else {
+                count_tree_path(std::path::Path::new(&local_path), follow_symlinks)
+            };
             let json = tree_count_json(&result);
             let _ = qt_thread.queue(move |mut controller| {
                 controller.as_mut().set_tree_count_result_json(QString::from(json));

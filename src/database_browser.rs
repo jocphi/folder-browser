@@ -101,6 +101,63 @@ fn db_row_to_file_row(row: DbChildRow) -> FileRow {
     }
 }
 
+
+pub(crate) fn count_database_tree_path(path: &str) -> Result<crate::tree_count_worker::TreeCountResult, String> {
+    let db_path = default_everything_rust_db_path();
+    let conn = Connection::open(&db_path)
+        .map_err(|error| format!("open database {}: {error}", db_path.display()))?;
+    let parent = normalize_db_parent_path(Path::new(path));
+    let Some(parent_id) = lookup_parent_id(&conn, &parent)
+        .map_err(|error| format!("lookup database parent id for {parent}: {error}"))? else {
+        return Ok(crate::tree_count_worker::TreeCountResult {
+            path: parent,
+            complete: false,
+            ..crate::tree_count_worker::TreeCountResult::default()
+        });
+    };
+
+    let (direct_files, direct_folders): (u64, u64) = conn
+        .query_row(
+            "SELECT
+                 COALESCE(SUM(CASE WHEN is_dir THEN 0 ELSE 1 END), 0),
+                 COALESCE(SUM(CASE WHEN is_dir THEN 1 ELSE 0 END), 0)
+             FROM files
+             WHERE parent_id = ?1",
+            params![parent_id],
+            |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+        )
+        .map_err(|error| format!("query direct database counts for {parent}: {error}"))?;
+
+    let (recursive_files, recursive_folders): (u64, u64) = conn
+        .query_row(
+            "WITH RECURSIVE subtree(id, parent_id, is_dir) AS (
+                 SELECT id, parent_id, is_dir
+                 FROM files
+                 WHERE parent_id = ?1
+                 UNION ALL
+                 SELECT child.id, child.parent_id, child.is_dir
+                 FROM files AS child
+                 JOIN subtree ON child.parent_id = subtree.id
+             )
+             SELECT
+                 COALESCE(SUM(CASE WHEN parent_id != ?1 AND is_dir = 0 THEN 1 ELSE 0 END), 0),
+                 COALESCE(SUM(CASE WHEN parent_id != ?1 AND is_dir = 1 THEN 1 ELSE 0 END), 0)
+             FROM subtree",
+            params![parent_id],
+            |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+        )
+        .map_err(|error| format!("query recursive database counts for {parent}: {error}"))?;
+
+    Ok(crate::tree_count_worker::TreeCountResult {
+        path: parent,
+        direct_files,
+        recursive_files,
+        direct_folders,
+        recursive_folders,
+        complete: true,
+    })
+}
+
 fn normalize_db_parent_path(parent: &Path) -> String {
     let mut s = parent.to_string_lossy().into_owned();
     if s.is_empty() {
