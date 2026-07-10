@@ -33,5 +33,11 @@ impl qobject::FolderBrowserController {
             .unwrap_or_else(|| QString::from("unknown"))
     }
 
+    pub fn file_live_status(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.live_status.clone()))
+            .unwrap_or_else(|| QString::from("unknown"))
+    }
+
 
 }

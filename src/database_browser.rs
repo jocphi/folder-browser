@@ -84,6 +84,7 @@ fn db_row_to_file_row(row: DbChildRow) -> FileRow {
         mime_type,
         mime_status: "done".to_string(),
         media_status: "none".to_string(),
+        live_status: "unknown".to_string(),
         size_bytes,
         size_text: format_size(size_bytes),
         size_status: if row.is_dir { SizeStatus::Unknown } else { SizeStatus::File },

@@ -47,12 +47,14 @@ ApplicationWindow {
     property string lastDatabasePath: ""
     property var columnProfiles: ({
         "Default": [
+            ({ key: "live", label: "Live", width: 48, fillWidth: false, menuKey: "live" }),
             ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
             ({ key: "kind", label: "Type", width: 90, fillWidth: false, menuKey: "kind" }),
             ({ key: "size", label: "Size", width: 100, fillWidth: false, menuKey: "size" }),
             ({ key: "modified", label: "Modified", width: 210, fillWidth: false, menuKey: "modified" })
         ],
         "Media": [
+            ({ key: "live", label: "Live", width: 48, fillWidth: false, menuKey: "live" }),
             ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
             ({ key: "kind", label: "Type", width: 120, fillWidth: false, menuKey: "kind" }),
             ({ key: "size", label: "Size", width: 110, fillWidth: false, menuKey: "size" }),
@@ -430,6 +432,8 @@ ApplicationWindow {
                 result = compareText(left.name, right.name);
                 if (foldersAlwaysAZ && left.isDir && right.isDir)
                     return result;
+            } else if (column === "live") {
+                result = compareText(left.liveStatus, right.liveStatus);
             } else if (column === "kind") {
                 result = compareText(displayType(left), displayType(right));
             } else if (column === "size") {
@@ -788,6 +792,7 @@ ApplicationWindow {
             durationSecs: -1, codec: "", videoCodec: "", audioCodec: "",
             bitrate: -1, fps: -1, mediaWidth: -1, mediaHeight: -1,
             mediaStatus: "none",
+            liveStatus: "live",
             path: parent, isDir: true, isParentEntry: true
         }
     }
@@ -953,6 +958,7 @@ ApplicationWindow {
                 kind: controller.fileKind(row),
                 mimeType: controller.fileMimeType(row),
                 mimeStatus: controller.fileMimeStatus(row),
+                liveStatus: controller.fileLiveStatus(row),
                 sizeBytes: controller.fileSizeBytes(row),
                 sizeStatus: controller.fileSizeStatus(row),
                 modifiedSecs: controller.fileModifiedSecs(row),

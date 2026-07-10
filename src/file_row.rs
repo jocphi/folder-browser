@@ -9,6 +9,7 @@ pub(crate) struct FileRow {
     pub(crate) mime_type: String,
     pub(crate) mime_status: String,
     pub(crate) media_status: String,
+    pub(crate) live_status: String,
     pub(crate) size_bytes: Option<u64>,
     pub(crate) size_text: String,
     pub(crate) size_status: SizeStatus,

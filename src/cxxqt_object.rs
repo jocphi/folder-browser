@@ -94,6 +94,10 @@ pub mod qobject {
         fn file_mime_status(&self, row: i32) -> QString;
 
         #[qinvokable]
+        #[cxx_name = "fileLiveStatus"]
+        fn file_live_status(&self, row: i32) -> QString;
+
+        #[qinvokable]
         #[cxx_name = "fileSizeBytes"]
         fn file_size_bytes(&self, row: i32) -> i64;
 

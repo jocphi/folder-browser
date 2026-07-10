@@ -11,6 +11,7 @@ Rectangle {
     property string columnProfileName: "Default"
     property var columnProfileColumns: []
     property var defaultColumnProfileColumns: [
+        ({ key: "live", label: "Live", width: 48, fillWidth: false, menuKey: "live" }),
         ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
         ({ key: "kind", label: "Type", width: 90, fillWidth: false, menuKey: "kind" }),
         ({ key: "size", label: "Size", width: 100, fillWidth: false, menuKey: "size" }),

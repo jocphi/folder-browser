@@ -23,6 +23,7 @@ Rectangle {
     required property double mediaWidth
     required property double mediaHeight
     required property string mediaStatus
+    required property string liveStatus
     required property string path
     required property bool isDir
 
@@ -32,6 +33,7 @@ Rectangle {
     property string rowFontFamily: "monospace"
     property string sortColumn: "name"
     property var columnProfileColumns: [
+        ({ key: "live", label: "Live", width: 48, fillWidth: false }),
         ({ key: "name", label: "Name", width: -1, fillWidth: true }),
         ({ key: "kind", label: "Type", width: 90, fillWidth: false }),
         ({ key: "size", label: "Size", width: 100, fillWidth: false }),
@@ -143,6 +145,20 @@ Rectangle {
         return String(Math.round(Number(value)))
     }
 
+    function liveStatusText() {
+        let status = String(rowDelegate.liveStatus || "unknown")
+        if (status === "live") return "☑"
+        if (status === "offline") return "☐"
+        return "…"
+    }
+
+    function liveStatusColor() {
+        let status = String(rowDelegate.liveStatus || "unknown")
+        if (status === "live") return "#22c55e"
+        if (status === "offline") return "#ef4444"
+        return rowDelegate.secondaryTextColor
+    }
+
     function displayTypeText() {
         let mime = String(rowDelegate.mimeType || "")
         if (rowDelegate.isDir || mime === "inode/directory")
@@ -188,6 +204,7 @@ Rectangle {
     }
 
     function textForColumn(columnName) {
+        if (columnName === "live") return rowDelegate.liveStatusText()
         if (columnName === "kind") return rowDelegate.displayTypeText()
         if (columnName === "mimeType") return rowDelegate.displayTypeText()
         if (columnName === "size") return rowDelegate.displaySizeFunction ? rowDelegate.displaySizeFunction(rowDelegate.sizeBytes, rowDelegate) : ""
@@ -204,6 +221,7 @@ Rectangle {
     }
 
     function textColorForColumn(columnName) {
+        if (columnName === "live") return rowDelegate.liveStatusColor()
         if (columnName === "kind" && (rowDelegate.mimeStatus === "scanning" || rowDelegate.mimeStatus === "error")) return rowDelegate.secondaryTextColor
         if (rowDelegate.isMediaColumn(columnName)) {
             return rowDelegate.mediaPlaceholderText(columnName).length > 0 ? rowDelegate.secondaryTextColor : rowDelegate.fileTextColor
@@ -213,7 +231,7 @@ Rectangle {
     }
 
     function horizontalAlignmentForColumn(columnName) {
-        return columnName === "name" ? Text.AlignLeft : Text.AlignRight
+        return columnName === "name" ? Text.AlignLeft : (columnName === "live" ? Text.AlignHCenter : Text.AlignRight)
     }
 
     function callOrEmpty(fn, arg1, arg2) {
