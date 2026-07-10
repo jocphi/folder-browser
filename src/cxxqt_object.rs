@@ -44,6 +44,10 @@ pub mod qobject {
         fn scan_path(self: Pin<&mut Self>, path: &QString);
 
         #[qinvokable]
+        #[cxx_name = "scanDatabasePath"]
+        fn scan_database_path(self: Pin<&mut Self>, path: &QString);
+
+        #[qinvokable]
         #[cxx_name = "trashPaths"]
         fn trash_paths(self: Pin<&mut Self>, paths: &QString);
 
@@ -154,6 +158,7 @@ use crate::formatting::normalize_local_path;
 use crate::file_row::FileRow;
 use crate::file_size_status::{DirectorySizeStatusUpdate, SizeStatus};
 use crate::scanner::{probe_mime_type, scan_directory};
+use crate::database_browser::scan_database_directory;
 use crate::signals::bump_update_generation;
 use crate::media_metadata::{apply_media_metadata, is_media_path, mark_media_metadata_unavailable, probe_media_metadata};
 use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
@@ -658,6 +663,37 @@ impl qobject::FolderBrowserController {
         QString::from(trash_preview_json(&trash_preview_items_for_paths(&paths)))
     }
 
+
+
+    pub fn scan_database_path(mut self: Pin<&mut Self>, path: &QString) {
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+
+        self.as_mut().set_current_path(QString::from(local_path.clone()));
+        self.as_mut().set_is_scanning(false);
+        self.as_mut().set_size_scan_done(0);
+        self.as_mut().set_size_scan_total(0);
+
+        match scan_database_directory(&local_path) {
+            Ok(rows) => {
+                let row_count = rows.len() as i32;
+                self.as_mut().rust_mut().rows = rows;
+                self.as_mut().set_row_count(row_count);
+                bump_update_generation(self.as_mut());
+                self.as_mut().set_status_text(QString::from(format!(
+                    "Database path loaded: {local_path} ({row_count} items)"
+                )));
+            }
+            Err(error) => {
+                self.as_mut().rust_mut().rows.clear();
+                self.as_mut().set_row_count(0);
+                bump_update_generation(self.as_mut());
+                self.as_mut().set_status_text(QString::from(format!(
+                    "Database path failed: {local_path}: {error}"
+                )));
+            }
+        }
+    }
 
             pub fn scan_path(mut self: Pin<&mut Self>, path: &QString) {
         let qt_thread = self.qt_thread();

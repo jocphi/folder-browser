@@ -9,6 +9,7 @@ pub mod file_is_dir;
 pub mod row;
 pub mod file_row;
 pub mod scanner;
+mod database_browser;
 pub mod dir_size_worker;
 pub mod signals;
 pub mod controller_accessors;
