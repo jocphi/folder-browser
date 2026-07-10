@@ -7,10 +7,14 @@ use std::process::Command;
 use std::time::UNIX_EPOCH;
 
 
-fn detect_mime_type(path: &Path, is_dir: bool, is_symlink: bool, is_file: bool) -> String {
+fn initial_mime_type(is_dir: bool, is_symlink: bool, is_file: bool) -> String {
     if is_dir { return "inode/directory".to_string(); }
     if is_symlink { return "inode/symlink".to_string(); }
     if !is_file { return "application/octet-stream".to_string(); }
+    String::new()
+}
+
+pub(crate) fn probe_mime_type(path: &Path) -> String {
     match Command::new("xdg-mime").arg("query").arg("filetype").arg(path).output() {
         Ok(output) if output.status.success() => {
             let mime_type = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -35,6 +39,7 @@ pub(crate) fn scan_directory(
                     kind: "error".to_string(),
                     mime_type: "application/x-unreadable".to_string(),
                     media_status: "none".to_string(),
+                    mime_status: "done".to_string(),
                     size_bytes: None,
                     size_text: String::new(),
                     size_status: SizeStatus::Error,
@@ -88,7 +93,8 @@ pub(crate) fn scan_directory(
 
         let size_bytes = if is_file { metadata.as_ref().map(|metadata| metadata.len()) } else { None };
         let size_status = if is_dir { SizeStatus::Unknown } else { SizeStatus::File };
-        let mime_type = detect_mime_type(&path, is_dir, is_symlink, is_file);
+        let mime_type = initial_mime_type(is_dir, is_symlink, is_file);
+        let mime_status = if is_file { "scanning".to_string() } else { "done".to_string() };
         let media_extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
         let media_status = if mime_type.starts_with("video/")
             || mime_type.starts_with("audio/")
@@ -108,6 +114,7 @@ pub(crate) fn scan_directory(
             name,
             kind,
             mime_type,
+            mime_status,
             media_status,
             size_bytes,
             size_text: format_size(size_bytes),

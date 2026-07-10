@@ -84,6 +84,7 @@ Rectangle {
     signal rowPressed(var mouse, int rowIndex)
     signal rowDoubleClicked(int rowIndex)
     signal deleteRequested()
+    signal listFocusGained()
 
     Layout.fillWidth: true
     Layout.fillHeight: true
@@ -96,7 +97,63 @@ Rectangle {
     }
 
     function containIndex(index) {
+        if (index < 0 || index >= fileList.count)
+            return
+        fileList.forceLayout()
         fileList.positionViewAtIndex(index, ListView.Contain)
+        Qt.callLater(function() {
+            if (index >= 0 && index < fileList.count) {
+                fileList.forceLayout()
+                fileList.positionViewAtIndex(index, ListView.Contain)
+            }
+            fileListView.clampListScroll()
+        })
+    }
+
+    function maxContentY() {
+        return Math.max(0, fileList.contentHeight - fileList.height)
+    }
+
+    function clampListScroll() {
+        if (!fileList)
+            return
+        let maxY = maxContentY()
+        if (fileList.contentY < 0)
+            fileList.contentY = 0
+        else if (fileList.contentY > maxY)
+            fileList.contentY = maxY
+    }
+
+    function refreshLayoutAfterModelChange() {
+        if (!fileList)
+            return
+        fileList.cancelFlick()
+        fileList.forceLayout()
+        clampListScroll()
+    }
+
+    function resetAfterRowsRebuilt() {
+        if (!fileList)
+            return
+
+        let wantedIndex = fileList.currentIndex
+        fileList.cancelFlick()
+        fileList.model = null
+        fileList.contentY = 0
+
+        Qt.callLater(function() {
+            if (!fileList)
+                return
+            fileList.model = fileListView.fileModel
+            fileList.forceLayout()
+            if (wantedIndex >= 0 && wantedIndex < fileList.count) {
+                fileList.currentIndex = wantedIndex
+                fileList.positionViewAtIndex(wantedIndex, ListView.Contain)
+            } else if (fileList.count > 0 && fileList.currentIndex < 0) {
+                fileList.currentIndex = 0
+            }
+            fileListView.clampListScroll()
+        })
     }
 
     function pageStep() {
@@ -133,8 +190,11 @@ Rectangle {
     }
 
     onCurrentIndexChanged: {
-        if (fileList.currentIndex !== currentIndex) {
-            fileList.currentIndex = currentIndex
+        let wantedIndex = currentIndex
+        if (wantedIndex >= fileList.count)
+            wantedIndex = fileList.count > 0 ? fileList.count - 1 : -1
+        if (fileList.currentIndex !== wantedIndex) {
+            fileList.currentIndex = wantedIndex
         }
     }
 
@@ -191,16 +251,18 @@ Rectangle {
             model: fileListView.fileModel
             focus: true
             activeFocusOnTab: true
+            onActiveFocusChanged: if (activeFocus) fileListView.listFocusGained()
             keyNavigationEnabled: true
             highlightMoveDuration: 80
-            onCurrentIndexChanged: fileListView.currentIndex = currentIndex
-            onContentYChanged: {
-                let maxY = Math.max(0, contentHeight - height)
-                if (contentY < 0)
-                    contentY = 0
-                else if (contentY > maxY)
-                    contentY = maxY
+            onCurrentIndexChanged: {
+                if (currentIndex >= count)
+                    currentIndex = count > 0 ? count - 1 : -1
+                fileListView.currentIndex = currentIndex
             }
+            onContentYChanged: fileListView.clampListScroll()
+            onContentHeightChanged: fileListView.refreshLayoutAfterModelChange()
+            onHeightChanged: fileListView.refreshLayoutAfterModelChange()
+            onCountChanged: fileListView.refreshLayoutAfterModelChange()
 
             Item {
                 id: fileListVerticalScrollBarOverlay

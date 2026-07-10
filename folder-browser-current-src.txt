@@ -1,0 +1,2504 @@
+===== SOURCE SNAPSHOT START =====
+Project: folder-browser-cxxqt-minimal
+Generated: 2026-06-27T14:28:08+02:00
+
+
+===== FILE START: build.rs =====
+
+use cxx_qt_build::{CxxQtBuilder, QmlModule};
+
+fn main() {
+    CxxQtBuilder::new_qml_module(
+        QmlModule::new("dk.john.folderbrowser")
+            .version(1, 0)
+            .qml_file("qml/main.qml")
+            .qml_file("qml/HeaderCell.qml")
+            .qml_file("qml/PathBar.qml")
+            .qml_file("qml/StatusBar.qml")
+            .qml_file("qml/ColorConfigDialog.qml")
+            .qml_file("qml/RowDelegate.qml")
+            .qml_file("qml/FileListView.qml")
+            .qml_file("qml/FileIcon.qml"),
+    )
+    // Qt Core is always linked. The cxx-qt-lib "full" feature enables Qt GUI/QML types.
+    // Qt QML commonly needs Qt Network available on some platforms.
+    .qt_module("Network")
+    .files(["src/cxxqt_object.rs"])
+    .build();
+}
+
+===== FILE END: build.rs =====
+
+===== FILE START: Cargo.toml =====
+
+[package]
+name = "folder-browser-cxxqt-minimal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+cxx = "1"
+cxx-qt = "0.8.1"
+cxx-qt-lib = { version = "0.8.1", features = ["full"] }
+
+[build-dependencies]
+# Required for statically linking Qt object files with Qt 6.
+cxx-qt-build = { version = "0.8.1", features = ["link_qt_object_files"] }
+
+===== FILE END: Cargo.toml =====
+
+===== FILE START: qml/ColorConfigDialog.qml =====
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Dialogs
+import QtQuick.Layouts
+
+Item {
+    id: colorConfigDialog
+
+    property var colorTarget
+    property var settingsTarget
+    property var colorDefinitions: []
+    property string rowFontFamily: "monospace"
+
+    property color titleTextColor: "#f9fafb"
+    property color panelBackgroundColor: "#20242b"
+    property color panelFocusBorderColor: "#60a5fa"
+    property color secondaryTextColor: "#d1d5db"
+    property color rowEvenColor: "#1f2937"
+    property color rowOddColor: "#20242b"
+
+    width: colorTarget ? colorTarget.width : 640
+    height: colorTarget ? colorTarget.height : 640
+    visible: false
+
+    function open() {
+        popup.open()
+    }
+
+    function close() {
+        popup.close()
+    }
+
+    function colorValue(key, fallbackValue) {
+        if (colorTarget && colorTarget[key] !== undefined) {
+            return colorTarget[key]
+        }
+        return fallbackValue || "#000000"
+    }
+
+    function setColorValue(key, value) {
+        if (colorTarget && colorTarget[key] !== undefined) {
+            colorTarget[key] = value
+        }
+    }
+
+    function loadColorSettings() {
+        if (!colorTarget || !settingsTarget) {
+            return
+        }
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            let definition = colorDefinitions[index]
+            colorTarget[definition.key] = settingsTarget[definition.key] || definition.defaultValue
+        }
+    }
+
+    function applyColorSettings() {
+        if (!colorTarget || !settingsTarget) {
+            return
+        }
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            let key = colorDefinitions[index].key
+            settingsTarget[key] = String(colorTarget[key])
+        }
+    }
+
+    function resetColorSetting(key) {
+        if (!colorTarget) {
+            return
+        }
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            let definition = colorDefinitions[index]
+            if (definition.key === key) {
+                colorTarget[key] = definition.defaultValue
+                return
+            }
+        }
+    }
+
+    function resetAllColors() {
+        if (!colorTarget) {
+            return
+        }
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            let definition = colorDefinitions[index]
+            colorTarget[definition.key] = definition.defaultValue
+        }
+    }
+
+    ColorDialog {
+        id: appColorDialog
+        property string targetColorProperty: ""
+        title: "Select color"
+        selectedColor: targetColorProperty.length > 0 ? colorConfigDialog.colorValue(targetColorProperty, "white") : "white"
+        onSelectedColorChanged: {
+            if (visible && targetColorProperty.length > 0) {
+                colorConfigDialog.setColorValue(targetColorProperty, selectedColor)
+            }
+        }
+        onAccepted: {
+            if (targetColorProperty.length > 0) {
+                colorConfigDialog.setColorValue(targetColorProperty, selectedColor)
+            }
+        }
+    }
+
+    Popup {
+        id: popup
+        modal: true
+        focus: true
+        width: Math.min(colorConfigDialog.width - 48, 640)
+        height: Math.min(colorConfigDialog.height - 48, 640)
+        x: Math.round((colorConfigDialog.width - width) / 2)
+        y: Math.round((colorConfigDialog.height - height) / 2)
+        padding: 12
+
+        background: Rectangle {
+            color: colorConfigDialog.panelBackgroundColor
+            border.color: colorConfigDialog.panelFocusBorderColor
+            radius: 8
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "Colors"
+                color: colorConfigDialog.titleTextColor
+                font.bold: true
+                font.pixelSize: 20
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: "Click a color rectangle to change the color immediately. Apply saves to the config file."
+                color: colorConfigDialog.secondaryTextColor
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                ColumnLayout {
+                    width: popup.width - 36
+                    spacing: 6
+
+                    Repeater {
+                        model: colorConfigDialog.colorDefinitions
+
+                        delegate: Rectangle {
+                            Layout.fillWidth: true
+                            height: 36
+                            radius: 4
+                            color: index % 2 === 0 ? colorConfigDialog.rowEvenColor : colorConfigDialog.rowOddColor
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 10
+
+                                Label {
+                                    text: modelData.label
+                                    color: colorConfigDialog.secondaryTextColor
+                                    font.family: colorConfigDialog.rowFontFamily
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 78
+                                    Layout.preferredHeight: 24
+                                    radius: 4
+                                    color: colorConfigDialog.colorValue(modelData.key, modelData.defaultValue)
+                                    border.color: colorConfigDialog.panelFocusBorderColor
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: {
+                                            appColorDialog.targetColorProperty = modelData.key
+                                            appColorDialog.selectedColor = colorConfigDialog.colorValue(modelData.key, modelData.defaultValue)
+                                            appColorDialog.open()
+                                        }
+                                    }
+                                }
+
+                                Label {
+                                    text: String(colorConfigDialog.colorValue(modelData.key, modelData.defaultValue))
+                                    color: colorConfigDialog.secondaryTextColor
+                                    font.family: colorConfigDialog.rowFontFamily
+                                    Layout.preferredWidth: 105
+                                    elide: Text.ElideRight
+                                }
+
+                                Button {
+                                    text: "Reset"
+                                    onClicked: colorConfigDialog.resetColorSetting(modelData.key)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "Reset all"
+                    onClicked: colorConfigDialog.resetAllColors()
+                }
+                Button {
+                    text: "Cancel"
+                    onClicked: {
+                        colorConfigDialog.loadColorSettings()
+                        popup.close()
+                    }
+                }
+                Button {
+                    text: "Apply"
+                    onClicked: {
+                        colorConfigDialog.applyColorSettings()
+                        popup.close()
+                    }
+                }
+            }
+        }
+    }
+}
+
+===== FILE END: qml/ColorConfigDialog.qml =====
+
+===== FILE START: qml/FileIcon.qml =====
+
+import QtQuick
+import QtQuick.Controls.impl
+import QtQuick.Layouts
+
+IconImage {
+    id: fileIcon
+
+    property var rowData
+    property int iconSize: 32
+    property var fileIconNameFunction
+
+    Layout.preferredWidth: iconSize
+    Layout.preferredHeight: iconSize
+    Layout.alignment: Qt.AlignVCenter
+
+    name: fileIconNameFunction && rowData ? fileIconNameFunction(rowData) : "text-x-generic"
+    sourceSize.width: iconSize
+    sourceSize.height: iconSize
+    color: "transparent"
+}
+
+===== FILE END: qml/FileIcon.qml =====
+
+===== FILE START: qml/FileListView.qml =====
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Rectangle {
+    id: fileListView
+
+    property var fileModel
+
+    property string sortColumn: "name"
+    property bool sortAscending: true
+    property int rowHeight: 32
+    property int fileIconSize: rowHeight
+    property string rowFontFamily: "monospace"
+    property int currentIndex: fileList.currentIndex
+    readonly property int count: fileList.count
+
+    property color panelBackgroundColor: "#20242b"
+    property color panelBorderColor: "#3b4252"
+    property color panelFocusBorderColor: "#60a5fa"
+    property color headerBackgroundColor: "#111827"
+    property color emptyTextColor: "#d8dee9"
+    property color rowEvenColor: "#1f2937"
+    property color rowOddColor: "#20242b"
+    property color selectedRowColor: "#7f1d1d"
+    property color keyboardCurrentRowColor: "#14532d"
+    property color activeSortHeaderColor: "#374151"
+    property color activeSortColumnColor: "#2b3544"
+    property color activeSortColumnSelectedColor: "#991b1b"
+    property color activeSortColumnCurrentColor: "#2A894D"
+    property color activeSortBorderColor: "#60a5fa"
+    property color headerTextColor: "#f9fafb"
+    property color folderTextColor: "#bfdbfe"
+    property color fileTextColor: "#e5e7eb"
+    property color secondaryTextColor: "#d1d5db"
+
+    property bool showHidden: false
+    property int allRowsLength: 0
+
+    property var nameHeaderMenu
+    property var typeHeaderMenu
+    property var sizeHeaderMenu
+    property var modifiedHeaderMenu
+
+    property var isRowSelectedFunction
+    property var fileIconNameFunction
+    property var uriListFromPathFunction
+    property var highlightedFileNameFunction
+    property var displaySizeFunction
+    property var sizeColorFunction
+    property var modifiedTextFunction
+
+    signal sortRequested(string columnName)
+    signal openCurrentRequested()
+    signal goParentRequested()
+    signal escapeToPathRequested()
+    signal toggleSelectionRequested(int rowIndex)
+    signal shiftCursorRequested(int direction)
+    signal rowPressed(var mouse, int rowIndex)
+    signal rowDoubleClicked(int rowIndex)
+
+    Layout.fillWidth: true
+    Layout.fillHeight: true
+    radius: 8
+    color: panelBackgroundColor
+    border.color: fileList.activeFocus ? panelFocusBorderColor : panelBorderColor
+
+    function forceListFocus() {
+        fileList.forceActiveFocus()
+    }
+
+    function containIndex(index) {
+        fileList.positionViewAtIndex(index, ListView.Contain)
+    }
+
+    onCurrentIndexChanged: {
+        if (fileList.currentIndex !== currentIndex) {
+            fileList.currentIndex = currentIndex
+        }
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 10
+        spacing: 6
+
+        Rectangle {
+            Layout.fillWidth: true
+            height: 34
+            color: headerBackgroundColor
+            radius: 4
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                spacing: 10
+
+                HeaderCell {
+                    title: "Name"
+                    columnName: "name"
+                    Layout.fillWidth: true
+                    menu: fileListView.nameHeaderMenu
+                    sortColumn: fileListView.sortColumn
+                    sortAscending: fileListView.sortAscending
+                    rowFontFamily: fileListView.rowFontFamily
+                    activeSortHeaderColor: fileListView.activeSortHeaderColor
+                    activeSortBorderColor: fileListView.activeSortBorderColor
+                    headerTextColor: fileListView.headerTextColor
+                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                }
+
+                HeaderCell {
+                    title: "Type"
+                    columnName: "kind"
+                    Layout.preferredWidth: 90
+                    menu: fileListView.typeHeaderMenu
+                    sortColumn: fileListView.sortColumn
+                    sortAscending: fileListView.sortAscending
+                    rowFontFamily: fileListView.rowFontFamily
+                    activeSortHeaderColor: fileListView.activeSortHeaderColor
+                    activeSortBorderColor: fileListView.activeSortBorderColor
+                    headerTextColor: fileListView.headerTextColor
+                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                }
+
+                HeaderCell {
+                    title: "Size"
+                    columnName: "size"
+                    Layout.preferredWidth: 100
+                    menu: fileListView.sizeHeaderMenu
+                    sortColumn: fileListView.sortColumn
+                    sortAscending: fileListView.sortAscending
+                    rowFontFamily: fileListView.rowFontFamily
+                    activeSortHeaderColor: fileListView.activeSortHeaderColor
+                    activeSortBorderColor: fileListView.activeSortBorderColor
+                    headerTextColor: fileListView.headerTextColor
+                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                }
+
+                HeaderCell {
+                    title: "Modified"
+                    columnName: "modified"
+                    Layout.preferredWidth: 210
+                    menu: fileListView.modifiedHeaderMenu
+                    sortColumn: fileListView.sortColumn
+                    sortAscending: fileListView.sortAscending
+                    rowFontFamily: fileListView.rowFontFamily
+                    activeSortHeaderColor: fileListView.activeSortHeaderColor
+                    activeSortBorderColor: fileListView.activeSortBorderColor
+                    headerTextColor: fileListView.headerTextColor
+                    onSortRequested: function(columnName) { fileListView.sortRequested(columnName) }
+                }
+            }
+        }
+
+        ListView {
+            id: fileList
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            spacing: 1
+            model: fileListView.fileModel
+            focus: true
+            activeFocusOnTab: true
+            keyNavigationEnabled: true
+            highlightMoveDuration: 80
+            onCurrentIndexChanged: fileListView.currentIndex = currentIndex
+
+            Keys.onReturnPressed: function(event) {
+                fileListView.openCurrentRequested()
+                event.accepted = true
+            }
+            Keys.onEnterPressed: function(event) {
+                fileListView.openCurrentRequested()
+                event.accepted = true
+            }
+            Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Backspace) {
+                    fileListView.goParentRequested()
+                    event.accepted = true
+                } else if ((event.key === Qt.Key_Up || event.key === Qt.Key_Down)
+                           && (event.modifiers & Qt.ShiftModifier)) {
+                    fileListView.shiftCursorRequested(event.key === Qt.Key_Up ? -1 : 1)
+                    event.accepted = true
+                }
+            }
+            Keys.onEscapePressed: function(event) {
+                fileListView.escapeToPathRequested()
+                event.accepted = true
+            }
+            Keys.onSpacePressed: function(event) {
+                fileListView.toggleSelectionRequested(fileList.currentIndex)
+                event.accepted = true
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                hoverEnabled: false
+                propagateComposedEvents: true
+                z: 10
+                onWheel: function(wheel) {
+                    let maxY = Math.max(0, fileList.contentHeight - fileList.height)
+                    let step = wheel.angleDelta.y * 3.0
+                    fileList.contentY = Math.max(0, Math.min(maxY, fileList.contentY - step))
+                    wheel.accepted = true
+                }
+            }
+
+            delegate: RowDelegate {
+                listWidth: fileList.width
+                current: fileList.currentIndex === index
+                selected: fileListView.isRowSelectedFunction ? fileListView.isRowSelectedFunction(index) : false
+                rowHeight: fileListView.rowHeight
+                fileIconSize: fileListView.fileIconSize
+                rowFontFamily: fileListView.rowFontFamily
+                sortColumn: fileListView.sortColumn
+                rowEvenColor: fileListView.rowEvenColor
+                rowOddColor: fileListView.rowOddColor
+                selectedRowColor: fileListView.selectedRowColor
+                keyboardCurrentRowColor: fileListView.keyboardCurrentRowColor
+                activeSortColumnColor: fileListView.activeSortColumnColor
+                activeSortColumnSelectedColor: fileListView.activeSortColumnSelectedColor
+                activeSortColumnCurrentColor: fileListView.activeSortColumnCurrentColor
+                folderTextColor: fileListView.folderTextColor
+                fileTextColor: fileListView.fileTextColor
+                secondaryTextColor: fileListView.secondaryTextColor
+                fileIconNameFunction: fileListView.fileIconNameFunction
+                uriListFromPathFunction: fileListView.uriListFromPathFunction
+                highlightedFileNameFunction: fileListView.highlightedFileNameFunction
+                displaySizeFunction: fileListView.displaySizeFunction
+                sizeColorFunction: fileListView.sizeColorFunction
+                modifiedTextFunction: fileListView.modifiedTextFunction
+                onRowPressed: function(mouse, rowIndex) { fileListView.rowPressed(mouse, rowIndex) }
+                onRowDoubleClicked: function(rowIndex) { fileListView.rowDoubleClicked(rowIndex) }
+            }
+        }
+
+        Label {
+            visible: fileList.count === 0
+            text: fileListView.allRowsLength > 0 && !fileListView.showHidden
+                  ? "Only hidden entries are available. Enable Show hidden to display them."
+                  : "No entries to display. Choose an existing directory and press Scan."
+            color: emptyTextColor
+            Layout.fillWidth: true
+            elide: Text.ElideRight
+        }
+    }
+}
+
+===== FILE END: qml/FileListView.qml =====
+
+===== FILE START: qml/HeaderCell.qml =====
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Rectangle {
+    id: headerCell
+
+    property string title
+    property string columnName
+    property string sortColumn
+    property bool sortAscending: true
+    property string rowFontFamily
+    property color activeSortHeaderColor: "#374151"
+    property color activeSortBorderColor: "#60a5fa"
+    property color headerTextColor: "#f9fafb"
+    property var menu
+
+    signal sortRequested(string columnName)
+
+    Layout.fillHeight: true
+    radius: 4
+    color: sortColumn === columnName ? activeSortHeaderColor : "transparent"
+    border.color: sortColumn === columnName ? activeSortBorderColor : "transparent"
+
+    function sortLabel() {
+        if (sortColumn !== columnName) {
+            return title
+        }
+        return title + (sortAscending ? " ▲" : " ▼")
+    }
+
+    Label {
+        anchors.centerIn: parent
+        text: headerCell.sortLabel()
+        color: headerTextColor
+        font.bold: true
+        font.family: rowFontFamily
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: function(mouse) {
+            if (mouse.button === Qt.RightButton) {
+                if (menu) {
+                    menu.popup()
+                }
+            } else {
+                headerCell.sortRequested(columnName)
+            }
+        }
+    }
+}
+
+===== FILE END: qml/HeaderCell.qml =====
+
+===== FILE START: qml/main.qml =====
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Controls.impl
+import QtQuick.Dialogs
+import QtQuick.Layouts
+import QtCore
+import dk.john.folderbrowser 1.0
+
+ApplicationWindow {
+    id: root
+    width: 1000
+    height: 620
+    visible: true
+    title: "folder-browser - CXX-Qt local explorer"
+    color: windowBackgroundColor
+
+    property var allRows: []
+    property string sortColumn: "name"
+    property bool sortAscending: true
+    property bool showHidden: false
+    property string filterText: ""
+
+    property int rowHeight: 32
+    property int fileIconSize: rowHeight
+    property string rowFontFamily: "Maple Mono NF"
+
+    property bool foldersFirst: true
+    property bool foldersAlwaysAZ: true
+    property string sizeUnit: "auto"
+
+    property var selectedPaths: []
+    property int lastSelectedIndex: -1
+
+    property color windowBackgroundColor: "#17191d"
+    property color titleTextColor: "#f9fafb"
+    property color panelBackgroundColor: "#20242b"
+    property color panelBorderColor: "#3b4252"
+    property color panelFocusBorderColor: "#60a5fa"
+    property color headerBackgroundColor: "#111827"
+    property color headerTextColor: "#f9fafb"
+    property color rowEvenColor: "#1f2937"
+    property color rowOddColor: "#20242b"
+    property color selectedRowColor: "#7f1d1d"
+    property color keyboardCurrentRowColor: "#14532d"
+    property color activeSortHeaderColor: "#374151"
+    property color activeSortColumnColor: "#2b3544"
+    property color activeSortColumnSelectedColor: "#991b1b"
+    property color activeSortColumnCurrentColor: "#2A894D"
+    property color activeSortBorderColor: "#60a5fa"
+    property color folderTextColor: "#bfdbfe"
+    property color fileTextColor: "#e5e7eb"
+    property color secondaryTextColor: "#d1d5db"
+    property color emptyTextColor: "#d8dee9"
+    property color dateHighlightColor: "#f97316"
+    property color sizeUnknownColor: "#7f1d1d"
+    property color sizeScanningColor: "#9ca3af"
+    property color sizeDoneColor: "#22c55e"
+    property color sizeErrorColor: "#ef4444"
+    property var colorDefinitions: [
+        ({ key: "windowBackgroundColor", label: "Window background", defaultValue: "#17191d" }),
+        ({ key: "titleTextColor", label: "Title text", defaultValue: "#f9fafb" }),
+        ({ key: "panelBackgroundColor", label: "Panel background", defaultValue: "#20242b" }),
+        ({ key: "panelBorderColor", label: "Panel border", defaultValue: "#3b4252" }),
+        ({ key: "panelFocusBorderColor", label: "Focused panel border", defaultValue: "#60a5fa" }),
+        ({ key: "headerBackgroundColor", label: "Header background", defaultValue: "#111827" }),
+        ({ key: "headerTextColor", label: "Header text", defaultValue: "#f9fafb" }),
+        ({ key: "rowEvenColor", label: "Even row", defaultValue: "#1f2937" }),
+        ({ key: "rowOddColor", label: "Odd row", defaultValue: "#20242b" }),
+        ({ key: "selectedRowColor", label: "Selected row", defaultValue: "#7f1d1d" }),
+        ({ key: "keyboardCurrentRowColor", label: "Keyboard current row", defaultValue: "#14532d" }),
+        ({ key: "activeSortHeaderColor", label: "Sorted header", defaultValue: "#374151" }),
+        ({ key: "activeSortColumnColor", label: "Sorted column", defaultValue: "#2b3544" }),
+        ({ key: "activeSortColumnSelectedColor", label: "Sorted column selected", defaultValue: "#991b1b" }),
+        ({ key: "activeSortColumnCurrentColor", label: "Sorted column keyboard current", defaultValue: "#2A894D" }),
+        ({ key: "activeSortBorderColor", label: "Sorted/focus border", defaultValue: "#60a5fa" }),
+        ({ key: "folderTextColor", label: "Folder name text", defaultValue: "#bfdbfe" }),
+        ({ key: "fileTextColor", label: "File name text", defaultValue: "#e5e7eb" }),
+        ({ key: "secondaryTextColor", label: "Secondary text", defaultValue: "#d1d5db" }),
+        ({ key: "emptyTextColor", label: "Empty/list message text", defaultValue: "#d8dee9" }),
+        ({ key: "dateHighlightColor", label: "Date highlight", defaultValue: "#f97316" }),
+        ({ key: "sizeUnknownColor", label: "Size unknown", defaultValue: "#7f1d1d" }),
+        ({ key: "sizeScanningColor", label: "Size scanning", defaultValue: "#9ca3af" }),
+        ({ key: "sizeDoneColor", label: "Size done", defaultValue: "#22c55e" }),
+        ({ key: "sizeErrorColor", label: "Size error", defaultValue: "#ef4444" })
+    ]
+
+    function loadColorSettings() {
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            let definition = colorDefinitions[index]
+            root[definition.key] = colorSettings[definition.key] || definition.defaultValue
+        }
+    }
+
+    function applyColorSettings() {
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            let key = colorDefinitions[index].key
+            colorSettings[key] = String(root[key])
+        }
+    }
+
+    function resetColorSetting(key) {
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            if (colorDefinitions[index].key === key) {
+                root[key] = colorDefinitions[index].defaultValue
+                return
+            }
+        }
+    }
+
+    function resetAllColors() {
+        for (let index = 0; index < colorDefinitions.length; index += 1) {
+            root[colorDefinitions[index].key] = colorDefinitions[index].defaultValue
+        }
+    }
+
+    function localPathFromUrl(urlValue) {
+        let text = String(urlValue);
+        if (text.startsWith("file://")) {
+            return decodeURIComponent(text.replace(/^file:\/\//, ""));
+        }
+        return text;
+    }
+
+    function fileUriFromPath(pathText) {
+        let text = String(pathText || "");
+        if (text.startsWith("file://")) {
+            return text;
+        }
+        if (!text.startsWith("/")) {
+            return text;
+        }
+        return "file://" + text.split("/").map(function (part) {
+            return encodeURIComponent(part);
+        }).join("/");
+    }
+
+    function uriListFromPath(pathText) {
+        return fileUriFromPath(pathText) + "\r\n";
+    }
+
+    function htmlEscape(textValue) {
+        return String(textValue || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    function highlightedFileName(fileName) {
+        let escaped = htmlEscape(fileName);
+        let datePattern = /(\b\d{4}[-_.]\d{2}[-_.]\d{2}\b|\b\d{8}\b|\b\d{2}[-_.]\d{2}[-_.]\d{4}\b)/g;
+        return escaped.replace(datePattern, "<span style='color:" + dateHighlightColor + "'>$1</span>");
+    }
+
+    function matchesFilter(row) {
+        let query = String(filterText || "").trim().toLowerCase();
+        if (query.length === 0) {
+            return true;
+        }
+        if (!row) {
+            return false;
+        }
+        return String(row.name || "").toLowerCase().indexOf(query) >= 0 || String(row.kind || "").toLowerCase().indexOf(query) >= 0 || String(row.path || "").toLowerCase().indexOf(query) >= 0;
+    }
+
+    function fileExtension(fileName) {
+        let name = String(fileName || "").toLowerCase();
+        let index = name.lastIndexOf(".");
+        if (index <= 0 || index === name.length - 1) {
+            return "";
+        }
+        return name.slice(index + 1);
+    }
+
+    function fileIconName(row) {
+        if (!row)
+            return "text-x-generic";
+        if (row.isDir)
+            return "folder";
+        if (row.kind === "symlink")
+            return "emblem-symbolic-link";
+
+        let ext = fileExtension(row.name);
+        if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "svg", "heic", "avif"].indexOf(ext) >= 0)
+            return "image-x-generic";
+        if (["mp4", "mkv", "webm", "avi", "mov", "m4v", "mpg", "mpeg", "wmv"].indexOf(ext) >= 0)
+            return "video-x-generic";
+        if (["mp3", "flac", "ogg", "opus", "wav", "m4a", "aac", "wma"].indexOf(ext) >= 0)
+            return "audio-x-generic";
+        if (ext === "pdf")
+            return "application-pdf";
+        if (["zip", "7z", "rar", "tar", "gz", "xz", "bz2", "zst"].indexOf(ext) >= 0)
+            return "package-x-generic";
+        if (["rs", "py", "sh", "bash", "fish", "js", "ts", "qml", "cpp", "c", "h", "hpp", "lua"].indexOf(ext) >= 0)
+            return "text-x-script";
+        if (["txt", "md", "json", "toml", "yaml", "yml", "xml", "csv", "log"].indexOf(ext) >= 0)
+            return "text-x-generic";
+        if (["odt", "doc", "docx", "rtf"].indexOf(ext) >= 0)
+            return "x-office-document";
+        if (["ods", "xls", "xlsx"].indexOf(ext) >= 0)
+            return "x-office-spreadsheet";
+        if (["odp", "ppt", "pptx"].indexOf(ext) >= 0)
+            return "x-office-presentation";
+        if (["appimage", "exe", "bin", "run"].indexOf(ext) >= 0)
+            return "application-x-executable";
+        if (ext === "desktop")
+            return "application-x-desktop";
+        return "text-x-generic";
+    }
+
+    function parentPath(pathText) {
+        let text = String(pathText);
+        if (text.length <= 1)
+            return "/";
+        if (text.endsWith("/") && text.length > 1)
+            text = text.slice(0, -1);
+        let index = text.lastIndexOf("/");
+        return index <= 0 ? "/" : text.slice(0, index);
+    }
+
+    function pad2(value) {
+        return String(value).padStart(2, "0");
+    }
+
+    function modifiedText(seconds) {
+        if (seconds === null || seconds === undefined || seconds < 0)
+            return "";
+        let date = new Date(seconds * 1000);
+        return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate()) + " " + pad2(date.getHours()) + ":" + pad2(date.getMinutes()) + ":" + pad2(date.getSeconds());
+    }
+
+    function isHiddenRow(row) {
+        return row && row.name && String(row.name).startsWith(".");
+    }
+
+    function filterRows(rows) {
+        let source = Array.from(rows || []);
+        if (!showHidden) {
+            source = source.filter(function (row) {
+                return !isHiddenRow(row);
+            });
+        }
+        return source.filter(function (row) {
+            return matchesFilter(row);
+        });
+    }
+
+    function compareText(left, right) {
+        return String(left || "").localeCompare(String(right || ""), Qt.locale(), {
+            sensitivity: "base",
+            numeric: true
+        });
+    }
+
+    function compareNullableNumber(left, right) {
+        let leftMissing = left === null || left === undefined || left < 0;
+        let rightMissing = right === null || right === undefined || right < 0;
+        if (leftMissing && rightMissing)
+            return 0;
+        if (leftMissing)
+            return 1;
+        if (rightMissing)
+            return -1;
+        return Number(left) - Number(right);
+    }
+
+    function sortRows(rows) {
+        let sorted = Array.from(rows || []);
+        let column = sortColumn;
+
+        sorted.sort(function (left, right) {
+            if (foldersFirst && left.isDir !== right.isDir) {
+                return left.isDir ? -1 : 1;
+            }
+
+            let result = 0;
+            if (column === "name") {
+                result = compareText(left.name, right.name);
+                if (foldersAlwaysAZ && left.isDir && right.isDir)
+                    return result;
+            } else if (column === "kind") {
+                result = compareText(left.kind, right.kind);
+            } else if (column === "size") {
+                result = compareNullableNumber(left.sizeBytes, right.sizeBytes);
+            } else if (column === "modified") {
+                result = compareNullableNumber(left.modifiedSecs, right.modifiedSecs);
+            }
+
+            if (result === 0) {
+                result = left.isDir !== right.isDir ? (left.isDir ? -1 : 1) : compareText(left.name, right.name);
+            }
+            return sortAscending ? result : -result;
+        });
+        return sorted;
+    }
+
+    function sortLabel(columnName, title) {
+        if (sortColumn !== columnName)
+            return title;
+        return title + (sortAscending ? " ▲" : " ▼");
+    }
+
+    function setSort(columnName) {
+        if (sortColumn === columnName) {
+            sortAscending = !sortAscending;
+        } else {
+            sortColumn = columnName;
+            sortAscending = true;
+        }
+        refreshDisplayedRows();
+        fileListView.forceListFocus();
+    }
+
+    function setSizeUnit(unitName) {
+        sizeUnit = unitName;
+        refreshDisplayedRows();
+    }
+
+    function europeanNumber(value, decimals) {
+        if (value === null || value === undefined || value < 0 || !isFinite(value))
+            return "";
+        let fixed = Number(value).toFixed(decimals);
+        let parts = fixed.split(".");
+        let integerPart = parts[0];
+        let decimalPart = parts.length > 1 ? parts[1] : "";
+        let withThousands = "";
+        while (integerPart.length > 3) {
+            withThousands = "." + integerPart.slice(-3) + withThousands;
+            integerPart = integerPart.slice(0, -3);
+        }
+        withThousands = integerPart + withThousands;
+        return decimals > 0 ? withThousands + "," + decimalPart : withThousands;
+    }
+
+    function displaySize(sizeBytes, row) {
+        if (row && row.isDir && row.sizeStatus === "unknown")
+            return "unknown";
+        if (sizeBytes === null || sizeBytes === undefined || sizeBytes < 0)
+            return "";
+
+        let bytes = Number(sizeBytes);
+        if (sizeUnit === "auto") {
+            let units = ["B", "kB", "MB", "GB", "TB"];
+            let index = 0;
+            let value = bytes;
+            while (value >= 1000 && index < units.length - 1) {
+                value /= 1000;
+                index += 1;
+            }
+            return europeanNumber(value, 2) + " " + units[index];
+        }
+
+        let divisor = 1;
+        let suffix = "B";
+        if (sizeUnit === "kb") {
+            divisor = 1000;
+            suffix = "kB";
+        } else if (sizeUnit === "mb") {
+            divisor = 1000000;
+            suffix = "MB";
+        } else if (sizeUnit === "gb") {
+            divisor = 1000000000;
+            suffix = "GB";
+        } else if (sizeUnit === "tb") {
+            divisor = 1000000000000;
+            suffix = "TB";
+        }
+        return europeanNumber(bytes / divisor, 2) + " " + suffix;
+    }
+
+    function sizeColor(row) {
+        if (!row || !row.isDir)
+            return secondaryTextColor;
+        if (row.sizeStatus === "unknown")
+            return selectedRowColor;
+        if (row.sizeStatus === "scanning")
+            return sizeScanningColor;
+        if (row.sizeStatus === "done")
+            return sizeDoneColor;
+        if (row.sizeStatus === "error")
+            return sizeErrorColor;
+        return secondaryTextColor;
+    }
+
+    function rebuildRowsFromController() {
+        let rows = [];
+        for (let row = 0; row < controller.rowCount; row += 1) {
+            rows.push({
+                name: controller.fileName(row),
+                kind: controller.fileKind(row),
+                sizeBytes: controller.fileSizeBytes(row),
+                sizeStatus: controller.fileSizeStatus(row),
+                modifiedSecs: controller.fileModifiedSecs(row),
+                path: controller.filePath(row),
+                isDir: controller.fileIsDir(row)
+            });
+        }
+        allRows = rows;
+        refreshDisplayedRows();
+    }
+
+    function refreshDisplayedRows() {
+        let rows = sortRows(filterRows(allRows));
+        fileModel.clear();
+        for (let index = 0; index < rows.length; index += 1) {
+            fileModel.append(rows[index]);
+        }
+        if (fileModel.count > 0) {
+            fileListView.currentIndex = Math.max(0, Math.min(fileListView.currentIndex, fileModel.count - 1));
+        } else {
+            fileListView.currentIndex = -1;
+        }
+    }
+
+    function scanPath(pathText) {
+        pathBar.pathText = String(pathText);
+        controller.scanPath(pathBar.pathText);
+        selectedPaths = [];
+        lastSelectedIndex = -1;
+        rebuildRowsFromController();
+        Qt.callLater(function () {
+            fileListView.forceListFocus();
+        });
+    }
+
+    function openRow(row) {
+        if (!row)
+            return;
+        if (row.isDir)
+            scanPath(row.path);
+        else
+            controller.statusText = "Selected file: " + row.path;
+    }
+
+    function openCurrentRow() {
+        if (fileListView.currentIndex >= 0 && fileListView.currentIndex < fileModel.count) {
+            openRow(fileModel.get(fileListView.currentIndex));
+        }
+    }
+
+    function rowPathAt(index) {
+        if (index < 0 || index >= fileModel.count)
+            return "";
+        return fileModel.get(index).path;
+    }
+
+    function isPathSelected(pathText) {
+        return selectedPaths.indexOf(pathText) >= 0;
+    }
+
+    function isRowSelected(index) {
+        return isPathSelected(rowPathAt(index));
+    }
+
+    function setSingleSelection(index) {
+        let path = rowPathAt(index);
+        selectedPaths = path.length > 0 ? [path] : [];
+        lastSelectedIndex = index;
+    }
+
+    function toggleSelection(index) {
+        let path = rowPathAt(index);
+        if (path.length === 0)
+            return;
+        let copy = Array.from(selectedPaths);
+        let existing = copy.indexOf(path);
+        if (existing >= 0)
+            copy.splice(existing, 1);
+        else
+            copy.push(path);
+        selectedPaths = copy;
+        lastSelectedIndex = index;
+    }
+
+    function selectRange(index) {
+        let anchor = lastSelectedIndex >= 0 ? lastSelectedIndex : fileListView.currentIndex;
+        if (anchor < 0)
+            anchor = index;
+        let first = Math.min(anchor, index);
+        let last = Math.max(anchor, index);
+        let paths = [];
+        for (let row = first; row <= last; row += 1) {
+            let path = rowPathAt(row);
+            if (path.length > 0)
+                paths.push(path);
+        }
+        selectedPaths = paths;
+    }
+
+    function handleShiftCursorSelection(direction) {
+        if (fileModel.count <= 0) {
+            return;
+        }
+
+        let oldIndex = fileListView.currentIndex;
+        if (oldIndex < 0) {
+            oldIndex = 0;
+        }
+
+        let newIndex = Math.max(0, Math.min(fileModel.count - 1, oldIndex + direction));
+        if (lastSelectedIndex < 0) {
+            lastSelectedIndex = oldIndex;
+        }
+
+        fileListView.currentIndex = newIndex;
+        selectRange(newIndex);
+        fileListView.containIndex(newIndex);
+        fileListView.forceListFocus();
+    }
+
+    function handleRowPress(mouse, index) {
+        fileListView.currentIndex = index;
+        fileListView.forceListFocus();
+        if (mouse.modifiers & Qt.ShiftModifier) {
+            selectRange(index);
+        } else if (mouse.modifiers & Qt.ControlModifier) {
+            toggleSelection(index);
+        } else {
+            setSingleSelection(index);
+        }
+    }
+
+    FolderBrowserController {
+        id: controller
+        currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
+        statusText: "Ready"
+        rowCount: 0
+        updateGeneration: 0
+        onUpdateGenerationChanged: rebuildRowsFromController()
+    }
+
+    ListModel {
+        id: fileModel
+    }
+
+    Settings {
+        id: colorSettings
+        category: "Colors"
+        property string windowBackgroundColor: "#17191d"
+        property string titleTextColor: "#f9fafb"
+        property string panelBackgroundColor: "#20242b"
+        property string panelBorderColor: "#3b4252"
+        property string panelFocusBorderColor: "#60a5fa"
+        property string headerBackgroundColor: "#111827"
+        property string headerTextColor: "#f9fafb"
+        property string rowEvenColor: "#1f2937"
+        property string rowOddColor: "#20242b"
+        property string selectedRowColor: "#7f1d1d"
+        property string keyboardCurrentRowColor: "#14532d"
+        property string activeSortHeaderColor: "#374151"
+        property string activeSortColumnColor: "#2b3544"
+        property string activeSortColumnSelectedColor: "#991b1b"
+        property string activeSortColumnCurrentColor: "#2A894D"
+        property string activeSortBorderColor: "#60a5fa"
+        property string folderTextColor: "#bfdbfe"
+        property string fileTextColor: "#e5e7eb"
+        property string secondaryTextColor: "#d1d5db"
+        property string emptyTextColor: "#d8dee9"
+        property string dateHighlightColor: "#f97316"
+        property string sizeUnknownColor: "#7f1d1d"
+        property string sizeScanningColor: "#9ca3af"
+        property string sizeDoneColor: "#22c55e"
+        property string sizeErrorColor: "#ef4444"
+    }
+
+
+    Timer {
+        id: rowsRebuildTimer
+        interval: 250
+        repeat: false
+        onTriggered: rebuildRowsFromController()
+    }
+
+    onShowHiddenChanged: refreshDisplayedRows()
+    Component.onCompleted: {
+        loadColorSettings()
+        scanPath(controller.currentPath)
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 16
+        spacing: 10
+
+        Label {
+            text: "folder-browser"
+            font.pixelSize: 24
+            font.bold: true
+            Layout.fillWidth: true
+        }
+
+        PathBar {
+            id: pathBar
+            Layout.fillWidth: true
+            pathText: controller.currentPath
+            filterText: root.filterText
+            showHidden: root.showHidden
+            onGoUpRequested: root.scanPath(root.parentPath(controller.currentPath))
+            onScanRequested: function(pathText) { root.scanPath(pathText) }
+            onColorsRequested: colorConfigPopup.open()
+            onFilterTextEdited: function(text) {
+                root.filterText = text
+                root.refreshDisplayedRows()
+            }
+            onShowHiddenToggled: function(checked) { root.showHidden = checked }
+        }
+
+        FileListView {
+            id: fileListView
+            fileModel: fileModel
+            sortColumn: root.sortColumn
+            sortAscending: root.sortAscending
+            rowHeight: root.rowHeight
+            fileIconSize: root.fileIconSize
+            rowFontFamily: root.rowFontFamily
+            panelBackgroundColor: root.panelBackgroundColor
+            panelBorderColor: root.panelBorderColor
+            panelFocusBorderColor: root.panelFocusBorderColor
+            headerBackgroundColor: root.headerBackgroundColor
+            emptyTextColor: root.emptyTextColor
+            rowEvenColor: root.rowEvenColor
+            rowOddColor: root.rowOddColor
+            selectedRowColor: root.selectedRowColor
+            keyboardCurrentRowColor: root.keyboardCurrentRowColor
+            activeSortHeaderColor: root.activeSortHeaderColor
+            activeSortColumnColor: root.activeSortColumnColor
+            activeSortColumnSelectedColor: root.activeSortColumnSelectedColor
+            activeSortColumnCurrentColor: root.activeSortColumnCurrentColor
+            activeSortBorderColor: root.activeSortBorderColor
+            headerTextColor: root.headerTextColor
+            folderTextColor: root.folderTextColor
+            fileTextColor: root.fileTextColor
+            secondaryTextColor: root.secondaryTextColor
+            showHidden: root.showHidden
+            allRowsLength: root.allRows.length
+            nameHeaderMenu: root.nameHeaderMenu
+            typeHeaderMenu: root.typeHeaderMenu
+            sizeHeaderMenu: root.sizeHeaderMenu
+            modifiedHeaderMenu: root.modifiedHeaderMenu
+            isRowSelectedFunction: root.isRowSelected
+            fileIconNameFunction: root.fileIconName
+            uriListFromPathFunction: root.uriListFromPath
+            highlightedFileNameFunction: root.highlightedFileName
+            displaySizeFunction: root.displaySize
+            sizeColorFunction: root.sizeColor
+            modifiedTextFunction: root.modifiedText
+            onSortRequested: function(columnName) { root.setSort(columnName) }
+            onOpenCurrentRequested: root.openCurrentRow()
+            onGoParentRequested: root.scanPath(root.parentPath(controller.currentPath))
+            onEscapeToPathRequested: pathBar.forcePathFocus()
+            onToggleSelectionRequested: function(rowIndex) { root.toggleSelection(rowIndex) }
+            onShiftCursorRequested: function(direction) { root.handleShiftCursorSelection(direction) }
+            onRowPressed: function(mouse, rowIndex) { root.handleRowPress(mouse, rowIndex) }
+            onRowDoubleClicked: function(rowIndex) { root.openRow(fileModel.get(rowIndex)) }
+        }
+
+        StatusBar {
+            Layout.fillWidth: true
+            statusText: controller.statusText
+            selectedCount: selectedPaths.length
+            visibleCount: fileListView.count
+            totalCount: allRows.length
+            filterText: root.filterText
+            secondaryTextColor: root.secondaryTextColor
+        }
+    }
+
+    Menu {
+        id: nameHeaderMenu
+        MenuItem {
+            text: "Folders first"
+            checkable: true
+            checked: foldersFirst
+            onTriggered: {
+                foldersFirst = checked;
+                refreshDisplayedRows();
+            }
+        }
+        MenuItem {
+            text: "Folders always sorted A-B"
+            checkable: true
+            checked: foldersAlwaysAZ
+            onTriggered: {
+                foldersAlwaysAZ = checked;
+                refreshDisplayedRows();
+            }
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Dummy: Natural sort"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: Case-sensitive sort"
+            enabled: false
+        }
+    }
+
+    Menu {
+        id: typeHeaderMenu
+        MenuItem {
+            text: "Dummy: Group by type"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: Hide unknown types"
+            enabled: false
+        }
+    }
+    Menu {
+        id: modifiedHeaderMenu
+        MenuItem {
+            text: "Dummy: Today only"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: This week"
+            enabled: false
+        }
+        MenuItem {
+            text: "Dummy: ISO UTC time"
+            enabled: false
+        }
+    }
+
+    Menu {
+        id: sizeHeaderMenu
+        MenuItem {
+            text: "Auto"
+            checkable: true
+            checked: sizeUnit === "auto"
+            onTriggered: setSizeUnit("auto")
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "B"
+            checkable: true
+            checked: sizeUnit === "bytes"
+            onTriggered: setSizeUnit("bytes")
+        }
+        MenuItem {
+            text: "kB"
+            checkable: true
+            checked: sizeUnit === "kb"
+            onTriggered: setSizeUnit("kb")
+        }
+        MenuItem {
+            text: "MB"
+            checkable: true
+            checked: sizeUnit === "mb"
+            onTriggered: setSizeUnit("mb")
+        }
+        MenuItem {
+            text: "GB"
+            checkable: true
+            checked: sizeUnit === "gb"
+            onTriggered: setSizeUnit("gb")
+        }
+        MenuItem {
+            text: "TB"
+            checkable: true
+            checked: sizeUnit === "tb"
+            onTriggered: setSizeUnit("tb")
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Dummy: Hide empty sizes"
+            enabled: false
+        }
+    }
+
+        ColorConfigDialog {
+        id: colorConfigPopup
+        colorTarget: root
+        settingsTarget: colorSettings
+        colorDefinitions: root.colorDefinitions
+        rowFontFamily: root.rowFontFamily
+        titleTextColor: root.titleTextColor
+        panelBackgroundColor: root.panelBackgroundColor
+        panelFocusBorderColor: root.panelFocusBorderColor
+        secondaryTextColor: root.secondaryTextColor
+        rowEvenColor: root.rowEvenColor
+        rowOddColor: root.rowOddColor
+    }
+
+
+
+}
+
+===== FILE END: qml/main.qml =====
+
+===== FILE START: qml/PathBar.qml =====
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+RowLayout {
+    id: pathBar
+
+    property alias pathText: pathField.text
+    property string filterText: ""
+    property bool showHidden: false
+
+    signal goUpRequested()
+    signal scanRequested(string pathText)
+    signal colorsRequested()
+    signal filterTextEdited(string text)
+    signal showHiddenToggled(bool checked)
+
+    spacing: 8
+
+    function forcePathFocus() {
+        pathField.forceActiveFocus()
+    }
+
+    Button { text: "Up"; onClicked: pathBar.goUpRequested() }
+
+    TextField {
+        id: pathField
+        Layout.fillWidth: true
+        placeholderText: "Enter a directory path, e.g. /home/joc/Pictures"
+        selectByMouse: true
+        onAccepted: pathBar.scanRequested(text)
+    }
+
+    Button { text: "Scan"; onClicked: pathBar.scanRequested(pathField.text) }
+    Button { text: "Colors"; onClicked: pathBar.colorsRequested() }
+
+    TextField {
+        id: filterField
+        Layout.preferredWidth: 220
+        text: pathBar.filterText
+        placeholderText: "Filter/search"
+        selectByMouse: true
+        onTextChanged: pathBar.filterTextEdited(text)
+        ToolTip.visible: hovered
+        ToolTip.text: "Filter by filename, type, or path"
+    }
+
+    CheckBox {
+        id: hiddenToggle
+        text: "Show hidden"
+        checked: pathBar.showHidden
+        onToggled: pathBar.showHiddenToggled(checked)
+        ToolTip.visible: hovered
+        ToolTip.text: "Show entries whose names start with a dot"
+    }
+}
+
+===== FILE END: qml/PathBar.qml =====
+
+===== FILE START: qml/RowDelegate.qml =====
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Controls.impl
+import QtQuick.Layouts
+
+Rectangle {
+    id: rowDelegate
+
+    required property int index
+    required property string name
+    required property string kind
+    required property double sizeBytes
+    required property string sizeStatus
+    required property double modifiedSecs
+    required property string path
+    required property bool isDir
+
+    property real listWidth: 0
+    property int rowHeight: 32
+    property int fileIconSize: rowHeight
+    property string rowFontFamily: "monospace"
+    property string sortColumn: "name"
+    property bool selected: false
+    property bool current: false
+
+    property color rowEvenColor: "#1f2937"
+    property color rowOddColor: "#20242b"
+    property color selectedRowColor: "#7f1d1d"
+    property color keyboardCurrentRowColor: "#14532d"
+    property color activeSortColumnColor: "#2b3544"
+    property color activeSortColumnSelectedColor: "#991b1b"
+    property color activeSortColumnCurrentColor: "#2A894D"
+    property color folderTextColor: "#bfdbfe"
+    property color fileTextColor: "#e5e7eb"
+    property color secondaryTextColor: "#d1d5db"
+
+    property var fileIconNameFunction
+    property var uriListFromPathFunction
+    property var highlightedFileNameFunction
+    property var displaySizeFunction
+    property var sizeColorFunction
+    property var modifiedTextFunction
+
+    signal rowPressed(var mouse, int rowIndex)
+    signal rowDoubleClicked(int rowIndex)
+
+    width: listWidth
+    height: rowHeight
+    radius: 4
+    color: selected && current
+           ? keyboardCurrentRowColor
+           : (selected
+              ? selectedRowColor
+              : (current ? keyboardCurrentRowColor : (index % 2 === 0 ? rowEvenColor : rowOddColor)))
+
+    function callOrEmpty(fn, arg1, arg2) {
+        if (fn) {
+            return fn(arg1, arg2)
+        }
+        return ""
+    }
+
+    Item {
+        id: dragProxy
+        width: 1
+        height: 1
+        visible: false
+        Drag.active: rowMouseArea.drag.active
+        Drag.dragType: Drag.Automatic
+        Drag.supportedActions: Qt.CopyAction
+        Drag.mimeData: {
+            "text/uri-list": rowDelegate.uriListFromPathFunction ? rowDelegate.uriListFromPathFunction(rowDelegate.path) : rowDelegate.path,
+            "text/plain": rowDelegate.path
+        }
+    }
+
+    RowLayout {
+        anchors.fill: parent
+        anchors.leftMargin: 8
+        anchors.rightMargin: 8
+        spacing: 10
+
+        Cell {
+            columnName: "name"
+            sortColumn: rowDelegate.sortColumn
+            selected: rowDelegate.selected
+            current: rowDelegate.current
+            activeSortColumnColor: rowDelegate.activeSortColumnColor
+            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
+            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
+            Layout.fillWidth: true
+
+            RowLayout {
+                anchors.fill: parent
+                spacing: 6
+
+                FileIcon {
+                    rowData: rowDelegate
+                    iconSize: rowDelegate.fileIconSize
+                    fileIconNameFunction: rowDelegate.fileIconNameFunction
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    verticalAlignment: Text.AlignVCenter
+                    text: rowDelegate.highlightedFileNameFunction ? rowDelegate.highlightedFileNameFunction(rowDelegate.name) : rowDelegate.name
+                    textFormat: Text.RichText
+                    color: rowDelegate.isDir ? rowDelegate.folderTextColor : rowDelegate.fileTextColor
+                    elide: Text.ElideRight
+                    font.family: rowDelegate.rowFontFamily
+                }
+            }
+        }
+
+        Cell {
+            columnName: "kind"
+            sortColumn: rowDelegate.sortColumn
+            selected: rowDelegate.selected
+            current: rowDelegate.current
+            activeSortColumnColor: rowDelegate.activeSortColumnColor
+            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
+            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
+            Layout.preferredWidth: 90
+
+            Label {
+                anchors.fill: parent
+                verticalAlignment: Text.AlignVCenter
+                text: rowDelegate.kind
+                color: rowDelegate.secondaryTextColor
+                elide: Text.ElideRight
+                font.family: rowDelegate.rowFontFamily
+            }
+        }
+
+        Cell {
+            columnName: "size"
+            sortColumn: rowDelegate.sortColumn
+            selected: rowDelegate.selected
+            current: rowDelegate.current
+            activeSortColumnColor: rowDelegate.activeSortColumnColor
+            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
+            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
+            Layout.preferredWidth: 100
+
+            Label {
+                anchors.fill: parent
+                verticalAlignment: Text.AlignVCenter
+                horizontalAlignment: Text.AlignRight
+                text: rowDelegate.displaySizeFunction ? rowDelegate.displaySizeFunction(rowDelegate.sizeBytes, rowDelegate) : ""
+                color: rowDelegate.sizeColorFunction ? rowDelegate.sizeColorFunction(rowDelegate) : rowDelegate.secondaryTextColor
+                font.family: rowDelegate.rowFontFamily
+            }
+        }
+
+        Cell {
+            columnName: "modified"
+            sortColumn: rowDelegate.sortColumn
+            selected: rowDelegate.selected
+            current: rowDelegate.current
+            activeSortColumnColor: rowDelegate.activeSortColumnColor
+            activeSortColumnSelectedColor: rowDelegate.activeSortColumnSelectedColor
+            activeSortColumnCurrentColor: rowDelegate.activeSortColumnCurrentColor
+            Layout.preferredWidth: 210
+
+            Label {
+                anchors.fill: parent
+                verticalAlignment: Text.AlignVCenter
+                text: rowDelegate.modifiedTextFunction ? rowDelegate.modifiedTextFunction(rowDelegate.modifiedSecs) : ""
+                color: rowDelegate.secondaryTextColor
+                elide: Text.ElideRight
+                font.family: rowDelegate.rowFontFamily
+            }
+        }
+    }
+
+    MouseArea {
+        id: rowMouseArea
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        drag.target: dragProxy
+        drag.axis: Drag.XAndYAxis
+        drag.threshold: 8
+        onPressed: function(mouse) {
+            rowDelegate.rowPressed(mouse, rowDelegate.index)
+        }
+        onClicked: function(mouse) {}
+        onDoubleClicked: rowDelegate.rowDoubleClicked(rowDelegate.index)
+        onReleased: {
+            dragProxy.x = 0
+            dragProxy.y = 0
+        }
+        onCanceled: {
+            dragProxy.x = 0
+            dragProxy.y = 0
+        }
+    }
+
+    component Cell: Rectangle {
+        property string columnName
+        property string sortColumn
+        property bool selected: false
+        property bool current: false
+        property color activeSortColumnColor: "#2b3544"
+        property color activeSortColumnSelectedColor: "#991b1b"
+        property color activeSortColumnCurrentColor: "#2A894D"
+
+        Layout.fillHeight: true
+        radius: 3
+        color: sortColumn === columnName
+               ? (selected
+                  ? activeSortColumnSelectedColor
+                  : (current ? activeSortColumnCurrentColor : activeSortColumnColor))
+               : "transparent"
+    }
+}
+
+===== FILE END: qml/RowDelegate.qml =====
+
+===== FILE START: qml/StatusBar.qml =====
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+RowLayout {
+    id: statusBar
+
+    property string statusText: ""
+    property int selectedCount: 0
+    property int visibleCount: 0
+    property int totalCount: 0
+    property string filterText: ""
+    property color secondaryTextColor: "#d1d5db"
+
+    spacing: 8
+
+    Label {
+        Layout.fillWidth: true
+        text: statusBar.statusText + " — " + statusBar.selectedCount + " selected"
+        color: statusBar.secondaryTextColor
+        elide: Text.ElideRight
+    }
+
+    Label {
+        text: statusBar.filterText.length > 0
+              ? statusBar.visibleCount + " / " + statusBar.totalCount + " matches"
+              : statusBar.visibleCount + " / " + statusBar.totalCount + " items"
+        color: statusBar.secondaryTextColor
+    }
+}
+
+===== FILE END: qml/StatusBar.qml =====
+
+===== FILE START: src/controller_accessors.rs =====
+
+use crate::cxxqt_object::qobject;
+use cxx_qt_lib::QString;
+
+impl qobject::FolderBrowserController {
+    pub fn file_name(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.name.clone()))
+            .unwrap_or_default()
+    }
+
+    pub fn file_kind(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.kind.clone()))
+            .unwrap_or_default()
+    }
+
+
+    pub fn file_size_status(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(row.size_status.as_str()))
+            .unwrap_or_else(|| QString::from("unknown"))
+    }
+
+
+}
+
+===== FILE END: src/controller_accessors.rs =====
+
+===== FILE START: src/cxxqt_object.rs =====
+
+/// CXX-Qt QObject bridge for the folder-browser scaffold.
+///
+/// Rust stores structured file rows, exposes them through invokable accessors,
+/// and calculates directory sizes on a throttled background thread.
+#[cxx_qt::bridge]
+pub mod qobject {
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/qstring.h");
+        type QString = cxx_qt_lib::QString;
+    }
+
+    extern "RustQt" {
+        #[qobject]
+        #[qml_element]
+        #[qproperty(i32, click_count, cxx_name = "clickCount")]
+        #[qproperty(QString, current_path, cxx_name = "currentPath")]
+        #[qproperty(QString, status_text, cxx_name = "statusText")]
+        #[qproperty(i32, row_count, cxx_name = "rowCount")]
+        #[qproperty(i32, update_generation, cxx_name = "updateGeneration")]
+        #[namespace = "folder_browser"]
+        type FolderBrowserController = super::FolderBrowserControllerRust;
+
+        #[qinvokable]
+        #[cxx_name = "incrementClickCount"]
+        fn increment_click_count(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[cxx_name = "setPathFromQml"]
+        fn set_path_from_qml(self: Pin<&mut Self>, path: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "scanPath"]
+        fn scan_path(self: Pin<&mut Self>, path: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "fileName"]
+        fn file_name(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileKind"]
+        fn file_kind(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileSizeBytes"]
+        fn file_size_bytes(&self, row: i32) -> i64;
+
+        #[qinvokable]
+        #[cxx_name = "fileSizeText"]
+        fn file_size_text(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileSizeStatus"]
+        fn file_size_status(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileModifiedSecs"]
+        fn file_modified_secs(&self, row: i32) -> i64;
+
+        #[qinvokable]
+        #[cxx_name = "filePath"]
+        fn file_path(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileIsDir"]
+        fn file_is_dir(&self, row: i32) -> bool;
+    }
+
+    impl cxx_qt::Threading for FolderBrowserController {}
+}
+
+use core::pin::Pin;
+use cxx_qt::{CxxQtType, Threading};
+use cxx_qt_lib::QString;
+use crate::formatting::normalize_local_path;
+use crate::file_row::FileRow;
+use crate::file_size_status::DirectorySizeStatusUpdate;
+use crate::scanner::scan_directory;
+use crate::signals::bump_update_generation;
+use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+#[derive(Default)]
+pub struct FolderBrowserControllerRust {
+    click_count: i32,
+    current_path: QString,
+    status_text: QString,
+    row_count: i32,
+    update_generation: i32,
+    pub(crate) rows: Vec<FileRow>,
+    pub(crate) scan_generation: u64,
+}
+
+
+
+
+
+
+
+
+
+impl qobject::FolderBrowserController {
+    pub fn increment_click_count(mut self: Pin<&mut Self>) {
+        let previous = *self.click_count();
+        let next = previous + 1;
+        self.as_mut().set_click_count(next);
+        self.as_mut().set_status_text(QString::from(format!(
+            "Rust received button click #{next}"
+        )));
+    }
+
+    pub fn set_path_from_qml(mut self: Pin<&mut Self>, path: &QString) {
+        self.as_mut().set_current_path(path.clone());
+        self.as_mut().set_status_text(QString::from(format!(
+            "Path set from QML: {}",
+            path.to_string()
+        )));
+    }
+
+    pub fn scan_path(mut self: Pin<&mut Self>, path: &QString) {
+        let qt_thread = self.qt_thread();
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        let directory = Path::new(&local_path);
+
+        self.as_mut().set_current_path(QString::from(local_path.clone()));
+        let next_generation = self.rust().scan_generation.wrapping_add(1);
+        self.as_mut().rust_mut().scan_generation = next_generation;
+        let generation = next_generation;
+
+        if !directory.exists() {
+            self.as_mut().rust_mut().rows.clear();
+            self.as_mut().set_row_count(0);
+            bump_update_generation(self.as_mut());
+            self.as_mut().set_status_text(QString::from(format!("Path does not exist: {local_path}")));
+            return;
+        }
+
+        if !directory.is_dir() {
+            self.as_mut().rust_mut().rows.clear();
+            self.as_mut().set_row_count(0);
+            bump_update_generation(self.as_mut());
+            self.as_mut().set_status_text(QString::from(format!("Not a directory: {local_path}")));
+            return;
+        }
+
+        let rows = match scan_directory(directory) {
+            Ok(rows) => rows,
+            Err(error) => {
+                self.as_mut().rust_mut().rows.clear();
+                self.as_mut().set_row_count(0);
+                bump_update_generation(self.as_mut());
+                self.as_mut().set_status_text(QString::from(format!(
+                    "Could not read directory {local_path}: {error}"
+                )));
+                return;
+            }
+        };
+
+        let directory_jobs: Vec<(usize, PathBuf)> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.is_dir)
+            .map(|(index, row)| (index, row.path.clone()))
+            .collect();
+
+        let count = rows.len();
+        self.as_mut().rust_mut().rows = rows;
+        self.as_mut().set_row_count(count.min(i32::MAX as usize) as i32);
+        bump_update_generation(self.as_mut());
+        self.as_mut().set_status_text(QString::from(format!(
+            "Scanned {count} entries in {local_path}; calculating directory sizes"
+        )));
+
+        if !directory_jobs.is_empty() {
+            std::thread::spawn(move || {
+                let status_qt_thread = qt_thread.clone();
+                let mut batch = DirectorySizeBatch::new(qt_thread, generation);
+
+                for (row_index, dir_path) in directory_jobs {
+                    let mut last_progress_update = Instant::now();
+
+                    let result = calculate_directory_size(&dir_path, |partial_size| {
+                        if last_progress_update.elapsed() >= Duration::from_secs(2) {
+                            batch.push(
+                                row_index,
+                                Some(partial_size),
+                                DirectorySizeStatusUpdate::Scanning,
+                            );
+                            batch.flush_if_needed(16, Duration::from_millis(750));
+                            last_progress_update = Instant::now();
+                        }
+                    });
+
+                    match result {
+                        Ok(final_size) => batch.push(
+                            row_index,
+                            Some(final_size),
+                            DirectorySizeStatusUpdate::Done,
+                        ),
+                        Err(_) => batch.push(row_index, None, DirectorySizeStatusUpdate::Error),
+                    }
+
+                    batch.flush_if_needed(32, Duration::from_millis(750));
+                }
+
+                batch.flush();
+
+                let _ = status_qt_thread.queue(move |mut controller| {
+                    if controller.rust().scan_generation == generation {
+                        controller.as_mut().set_status_text(QString::from("Directory size calculation finished"));
+                    }
+                });
+            });
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+}
+
+===== FILE END: src/cxxqt_object.rs =====
+
+===== FILE START: src/dir_size_worker.rs =====
+
+use crate::cxxqt_object::qobject;
+use crate::file_row::PendingDirectorySizeUpdate;
+use crate::file_size_status::DirectorySizeStatusUpdate;
+use crate::formatting::format_size;
+use crate::signals::bump_update_generation;
+use cxx_qt::CxxQtType;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+pub(crate) struct DirectorySizeBatch {
+    qt_thread: cxx_qt::CxxQtThread<qobject::FolderBrowserController>,
+    generation: u64,
+    pending: Vec<PendingDirectorySizeUpdate>,
+    last_flush: Instant,
+}
+
+impl DirectorySizeBatch {
+    pub(crate) fn new(
+        qt_thread: cxx_qt::CxxQtThread<qobject::FolderBrowserController>,
+        generation: u64,
+    ) -> Self {
+        Self {
+            qt_thread,
+            generation,
+            pending: Vec::new(),
+            last_flush: Instant::now(),
+        }
+    }
+
+    pub(crate) fn push(
+        &mut self,
+        row_index: usize,
+        size_bytes: Option<u64>,
+        status: DirectorySizeStatusUpdate,
+    ) {
+        self.pending.push(PendingDirectorySizeUpdate {
+            row_index,
+            size_bytes,
+            status,
+        });
+    }
+
+    pub(crate) fn flush_if_needed(&mut self, max_pending: usize, max_elapsed: Duration) {
+        if self.pending.len() >= max_pending || self.last_flush.elapsed() >= max_elapsed {
+            self.flush();
+        }
+    }
+
+    pub(crate) fn flush(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+
+        let generation = self.generation;
+        let updates = std::mem::take(&mut self.pending);
+        self.last_flush = Instant::now();
+
+        let _ = self.qt_thread.queue(move |mut controller| {
+            if controller.rust().scan_generation != generation {
+                return;
+            }
+
+            let rows = &mut controller.as_mut().rust_mut().rows;
+            for update in updates {
+                if let Some(row) = rows.get_mut(update.row_index) {
+                    row.size_bytes = update.size_bytes;
+                    row.size_text = format_size(update.size_bytes);
+                    row.size_status = update.status.to_size_status();
+                }
+            }
+            bump_update_generation(controller.as_mut());
+        });
+    }
+}
+
+pub(crate) fn calculate_directory_size<F>(directory: &Path, mut progress: F) -> Result<u64, std::io::Error>
+where
+    F: FnMut(u64),
+{
+    let mut total: u64 = 0;
+    let mut stack: Vec<PathBuf> = vec![directory.to_path_buf()];
+
+    while let Some(current_directory) = stack.pop() {
+        let read_dir = match fs::read_dir(&current_directory) {
+            Ok(read_dir) => read_dir,
+            Err(_) => continue,
+        };
+
+        for entry_result in read_dir {
+            let entry = match entry_result {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            } else if file_type.is_file() {
+                if let Ok(metadata) = entry.metadata() {
+                    total = total.saturating_add(metadata.len());
+                    progress(total);
+                }
+            }
+        }
+    }
+
+    Ok(total)
+}
+
+===== FILE END: src/dir_size_worker.rs =====
+
+===== FILE START: src/file_is_dir.rs =====
+
+use crate::cxxqt_object::qobject;
+use cxx_qt::CxxQtType;
+
+impl qobject::FolderBrowserController {
+    pub fn file_is_dir(&self, row: i32) -> bool {
+        if row < 0 {
+            return false;
+        }
+
+        self.rust()
+            .rows
+            .get(row as usize)
+            .map(|row| row.is_dir)
+            .unwrap_or(false)
+    }
+}
+
+===== FILE END: src/file_is_dir.rs =====
+
+===== FILE START: src/file_modified_secs.rs =====
+
+use crate::cxxqt_object::qobject;
+use cxx_qt::CxxQtType;
+
+impl qobject::FolderBrowserController {
+    pub fn file_modified_secs(&self, row: i32) -> i64 {
+        if row < 0 {
+            return -1;
+        }
+
+        self.rust()
+            .rows
+            .get(row as usize)
+            .and_then(|row| row.modified_secs)
+            .and_then(|value| i64::try_from(value).ok())
+            .unwrap_or(-1)
+    }
+}
+
+===== FILE END: src/file_modified_secs.rs =====
+
+===== FILE START: src/file_path.rs =====
+
+use crate::cxxqt_object::qobject;
+use cxx_qt::CxxQtType;
+use cxx_qt_lib::QString;
+
+impl qobject::FolderBrowserController {
+    pub fn file_path(&self, row: i32) -> QString {
+        if row < 0 {
+            return QString::default();
+        }
+
+        self.rust()
+            .rows
+            .get(row as usize)
+            .map(|row| QString::from(row.path.to_string_lossy().to_string()))
+            .unwrap_or_default()
+    }
+}
+
+===== FILE END: src/file_path.rs =====
+
+===== FILE START: src/file_row.rs =====
+
+use std::path::PathBuf;
+use crate::file_size_status::{DirectorySizeStatusUpdate, SizeStatus};
+
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FileRow {
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) size_bytes: Option<u64>,
+    pub(crate) size_text: String,
+    pub(crate) size_status: SizeStatus,
+    pub(crate) modified_secs: Option<u64>,
+    pub(crate) path: PathBuf,
+    pub(crate) is_dir: bool,
+}
+
+
+#[derive(Clone, Debug)]
+pub(crate) struct PendingDirectorySizeUpdate {
+    pub(crate) row_index: usize,
+    pub(crate) size_bytes: Option<u64>,
+    pub(crate) status: DirectorySizeStatusUpdate,
+}
+
+===== FILE END: src/file_row.rs =====
+
+===== FILE START: src/file_size_bytes.rs =====
+
+use crate::cxxqt_object::qobject;
+use cxx_qt::CxxQtType;
+
+pub(crate) fn option_u64_to_qml_i64(value: Option<u64>) -> i64 {
+    value.and_then(|value| i64::try_from(value).ok()).unwrap_or(-1)
+}
+
+impl qobject::FolderBrowserController {
+    pub fn file_size_bytes(&self, row: i32) -> i64 {
+        if row < 0 {
+            return -1;
+        }
+
+        self.rust()
+            .rows
+            .get(row as usize)
+            .and_then(|row| row.size_bytes)
+            .map(Some)
+            .map(option_u64_to_qml_i64)
+            .unwrap_or(-1)
+    }
+}
+
+===== FILE END: src/file_size_bytes.rs =====
+
+===== FILE START: src/file_size_status.rs =====
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SizeStatus {
+    #[default]
+    File,
+    Unknown,
+    Scanning,
+    Done,
+    Error,
+}
+
+impl SizeStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            SizeStatus::File => "file",
+            SizeStatus::Unknown => "unknown",
+            SizeStatus::Scanning => "scanning",
+            SizeStatus::Done => "done",
+            SizeStatus::Error => "error",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum DirectorySizeStatusUpdate {
+    Scanning,
+    Done,
+    Error,
+}
+
+impl DirectorySizeStatusUpdate {
+    pub(crate) fn to_size_status(self) -> SizeStatus {
+        match self {
+            DirectorySizeStatusUpdate::Scanning => SizeStatus::Scanning,
+            DirectorySizeStatusUpdate::Done => SizeStatus::Done,
+            DirectorySizeStatusUpdate::Error => SizeStatus::Error,
+        }
+    }
+}
+
+===== FILE END: src/file_size_status.rs =====
+
+===== FILE START: src/file_size_text.rs =====
+
+use crate::cxxqt_object::qobject;
+use cxx_qt::CxxQtType;
+use cxx_qt_lib::QString;
+
+impl qobject::FolderBrowserController {
+    pub fn file_size_text(&self, row: i32) -> QString {
+        if row < 0 {
+            return QString::default();
+        }
+
+        self.rust()
+            .rows
+            .get(row as usize)
+            .map(|row| QString::from(row.size_text.clone()))
+            .unwrap_or_default()
+    }
+}
+
+===== FILE END: src/file_size_text.rs =====
+
+===== FILE START: src/formatting.rs =====
+
+pub(crate) fn format_size(size_bytes: Option<u64>) -> String {
+    let Some(bytes) = size_bytes else {
+        return String::new();
+    };
+
+    const UNITS: [&str; 5] = ["B", "kB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit_index = 0usize;
+
+    while value >= 1000.0 && unit_index < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit_index += 1;
+    }
+
+    if unit_index == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.2} {}", UNITS[unit_index])
+    }
+}
+
+pub(crate) fn normalize_local_path(input: &str) -> String {
+    input.strip_prefix("file://").unwrap_or(input).to_string()
+}
+
+===== FILE END: src/formatting.rs =====
+
+===== FILE START: src/main.rs =====
+
+pub mod formatting;
+pub mod file_size_status;
+pub mod file_size_bytes;
+pub mod file_size_text;
+pub mod file_modified_secs;
+pub mod file_path;
+pub mod file_is_dir;
+pub mod row;
+pub mod file_row;
+pub mod scanner;
+pub mod dir_size_worker;
+pub mod signals;
+pub mod controller_accessors;
+pub mod cxxqt_object;
+
+use cxx_qt::casting::Upcast;
+use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QQmlEngine, QString, QUrl};
+use std::pin::Pin;
+
+fn main() {
+    let mut app = QGuiApplication::new();
+    if let Some(mut app) = app.as_mut() {
+        app.as_mut()
+            .set_organization_name(&QString::from("John Ole Hasselbalch Clausen"));
+        app.as_mut()
+            .set_organization_domain(&QString::from("local.john"));
+        app.as_mut()
+            .set_application_name(&QString::from("folder-browser"));
+    }
+    let mut engine = QQmlApplicationEngine::new();
+
+    if let Some(engine) = engine.as_mut() {
+        engine.load(&QUrl::from(
+            "qrc:/qt/qml/dk/john/folderbrowser/qml/main.qml",
+        ));
+    }
+
+    if let Some(engine) = engine.as_mut() {
+        let engine: Pin<&mut QQmlEngine> = engine.upcast_pin();
+        engine
+            .on_quit(|_| {
+                println!("QML requested quit");
+            })
+            .release();
+    }
+
+    if let Some(app) = app.as_mut() {
+        app.exec();
+    }
+}
+
+===== FILE END: src/main.rs =====
+
+===== FILE START: src/row.rs =====
+
+use crate::cxxqt_object::qobject;
+use crate::file_row::FileRow;
+use cxx_qt::CxxQtType;
+
+impl qobject::FolderBrowserController {
+    pub(crate) fn row(&self, row: i32) -> Option<&FileRow> {
+        if row < 0 {
+            return None;
+        }
+
+        self.rust().rows.get(row as usize)
+    }
+}
+
+===== FILE END: src/row.rs =====
+
+===== FILE START: src/scanner.rs =====
+
+use crate::file_row::FileRow;
+use crate::file_size_status::SizeStatus;
+use crate::formatting::format_size;
+use std::fs;
+use std::path::Path;
+use std::time::UNIX_EPOCH;
+
+pub(crate) fn scan_directory(directory: &Path) -> Result<Vec<FileRow>, std::io::Error> {
+    let mut rows: Vec<FileRow> = Vec::new();
+
+    for entry_result in fs::read_dir(directory)? {
+        let entry = match entry_result {
+            Ok(entry) => entry,
+            Err(error) => {
+                rows.push(FileRow {
+                    name: format!("<unreadable entry: {error}>"),
+                    kind: "error".to_string(),
+                    size_bytes: None,
+                    size_text: String::new(),
+                    size_status: SizeStatus::Error,
+                    modified_secs: None,
+                    path: directory.to_path_buf(),
+                    is_dir: false,
+                });
+                continue;
+            }
+        };
+
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let file_type = entry.file_type();
+        let metadata = entry.metadata().ok();
+
+        let is_dir = file_type.as_ref().map(|kind| kind.is_dir()).unwrap_or(false);
+        let is_file = file_type.as_ref().map(|kind| kind.is_file()).unwrap_or(false);
+        let is_symlink = file_type.as_ref().map(|kind| kind.is_symlink()).unwrap_or(false);
+
+        let kind = if is_dir {
+            "folder"
+        } else if is_file {
+            "file"
+        } else if is_symlink {
+            "symlink"
+        } else {
+            "other"
+        }
+        .to_string();
+
+        let size_bytes = if is_file {
+            metadata.as_ref().map(|metadata| metadata.len())
+        } else {
+            None
+        };
+        let size_status = if is_dir {
+            SizeStatus::Unknown
+        } else {
+            SizeStatus::File
+        };
+
+        let modified_secs = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+
+        rows.push(FileRow {
+            name,
+            kind,
+            size_bytes,
+            size_text: format_size(size_bytes),
+            size_status,
+            modified_secs,
+            path,
+            is_dir,
+        });
+    }
+
+    rows.sort_by(|left, right| {
+        right
+            .is_dir
+            .cmp(&left.is_dir)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+
+    Ok(rows)
+}
+
+===== FILE END: src/scanner.rs =====
+
+===== FILE START: src/signals.rs =====
+
+use core::pin::Pin;
+
+use crate::cxxqt_object::qobject;
+
+pub(crate) fn bump_update_generation(mut controller: Pin<&mut qobject::FolderBrowserController>) {
+    let current = *controller.update_generation();
+    let next = current.wrapping_add(1);
+    controller.as_mut().set_update_generation(next);
+}
+
+===== FILE END: src/signals.rs =====
+
+===== SOURCE SNAPSHOT END =====

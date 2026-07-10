@@ -3,6 +3,7 @@ pub(crate) enum SizeStatus {
     #[default]
     File,
     Unknown,
+    Stale,
     Scanning,
     Done,
     Error,
@@ -13,6 +14,7 @@ impl SizeStatus {
         match self {
             SizeStatus::File => "file",
             SizeStatus::Unknown => "unknown",
+            SizeStatus::Stale => "stale",
             SizeStatus::Scanning => "scanning",
             SizeStatus::Done => "done",
             SizeStatus::Error => "error",

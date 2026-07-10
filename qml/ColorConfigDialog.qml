@@ -51,7 +51,14 @@ Item {
             let definition = colorDefinitions[index]
             colorTarget[definition.key] = settingsTarget[definition.key] || definition.defaultValue
         }
-    }
+    
+        if (colorTarget.rangeAnchorMarkerMode !== undefined) {
+            colorTarget.rangeAnchorMarkerMode = settingsTarget.rangeAnchorMarkerMode || "lighter"
+        }
+        if (colorTarget.rangeAnchorMarkerPercent !== undefined) {
+            colorTarget.rangeAnchorMarkerPercent = Number(settingsTarget.rangeAnchorMarkerPercent || 10)
+        }
+}
 
     function applyColorSettings() {
         if (!colorTarget || !settingsTarget) {
@@ -61,7 +68,14 @@ Item {
             let key = colorDefinitions[index].key
             settingsTarget[key] = String(colorTarget[key])
         }
-    }
+    
+        if (colorTarget.rangeAnchorMarkerMode !== undefined) {
+            settingsTarget.rangeAnchorMarkerMode = String(colorTarget.rangeAnchorMarkerMode)
+        }
+        if (colorTarget.rangeAnchorMarkerPercent !== undefined) {
+            settingsTarget.rangeAnchorMarkerPercent = Number(colorTarget.rangeAnchorMarkerPercent)
+        }
+}
 
     function resetColorSetting(key) {
         if (!colorTarget) {
@@ -84,7 +98,14 @@ Item {
             let definition = colorDefinitions[index]
             colorTarget[definition.key] = definition.defaultValue
         }
-    }
+    
+        if (colorTarget.rangeAnchorMarkerMode !== undefined) {
+            colorTarget.rangeAnchorMarkerMode = "lighter"
+        }
+        if (colorTarget.rangeAnchorMarkerPercent !== undefined) {
+            colorTarget.rangeAnchorMarkerPercent = 10
+        }
+}
 
     ColorDialog {
         id: appColorDialog
@@ -136,6 +157,70 @@ Item {
                 color: colorConfigDialog.secondaryTextColor
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
+            }
+
+
+            Rectangle {
+                id: rangeAnchorMarkerOptionsPanel
+                Layout.fillWidth: true
+                height: 72
+                radius: 6
+                color: colorConfigDialog.rowOddColor
+                border.color: colorConfigDialog.panelFocusBorderColor
+                visible: colorConfigDialog.colorTarget
+                         && colorConfigDialog.colorTarget.rangeAnchorMarkerMode !== undefined
+                         && colorConfigDialog.colorTarget.rangeAnchorMarkerPercent !== undefined
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 10
+
+                    Text {
+                        text: "Range anchor marker"
+                        color: colorConfigDialog.secondaryTextColor
+                        font.family: colorConfigDialog.rowFontFamily
+                        Layout.preferredWidth: 190
+                        elide: Text.ElideRight
+                    }
+
+                    ComboBox {
+                        id: rangeAnchorMarkerModeCombo
+                        model: ["lighter", "darker", "custom"]
+                        Layout.preferredWidth: 130
+                        currentIndex: colorConfigDialog.colorTarget
+                                      ? Math.max(0, model.indexOf(String(colorConfigDialog.colorTarget.rangeAnchorMarkerMode || "lighter")))
+                                      : 0
+                        onActivated: function(index) {
+                            if (colorConfigDialog.colorTarget) {
+                                colorConfigDialog.colorTarget.rangeAnchorMarkerMode = model[index]
+                            }
+                        }
+                    }
+
+                    SpinBox {
+                        id: rangeAnchorMarkerPercentSpinBox
+                        from: 0
+                        to: 100
+                        stepSize: 1
+                        value: colorConfigDialog.colorTarget ? Number(colorConfigDialog.colorTarget.rangeAnchorMarkerPercent || 10) : 10
+                        enabled: colorConfigDialog.colorTarget && colorConfigDialog.colorTarget.rangeAnchorMarkerMode !== "custom"
+                        Layout.preferredWidth: 90
+                        onValueModified: {
+                            if (colorConfigDialog.colorTarget) {
+                                colorConfigDialog.colorTarget.rangeAnchorMarkerPercent = value
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "% shade; custom uses the Range anchor marker color below"
+                        color: colorConfigDialog.secondaryTextColor
+                        font.family: colorConfigDialog.rowFontFamily
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                    }
+                }
             }
 
             ScrollView {

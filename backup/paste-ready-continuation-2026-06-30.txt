@@ -1,0 +1,621 @@
+Below is a **paste-ready continuation summary** for a new chat.
+
+***
+
+# Continuation Summary: `folder-browser-cxxqt-minimal`
+
+We are developing a Qt6 / QML / Rust / CXX-Qt file-browser project:
+
+```bash
+/home/joc/Projects/folder-browser-cxxqt-minimal
+```
+
+The user is on CachyOS / KDE Plasma 6 and prefers safe, reversible Python patch scripts with backups, verification commands, and clear commit steps.
+
+The current development style is:
+
+* Apply patch script from `~/Downloads`
+* Run:
+
+```bash
+cd /home/joc/Projects/folder-browser-cxxqt-minimal
+QMAKE=/usr/bin/qmake6 cargo run
+```
+
+* Verify behavior
+* Commit and push if it works
+
+***
+
+## Current Source Code State
+
+The project has been heavily modularized already. Important current files include:
+
+```text
+src/cxxqt_object.rs
+src/scanner.rs
+src/dir_size_worker.rs
+src/file_row.rs
+src/file_size_status.rs
+src/formatting.rs
+src/signals.rs
+
+qml/main.qml
+qml/FileListView.qml
+qml/StatusBar.qml
+qml/HeaderCell.qml
+qml/RowDelegate.qml
+qml/FileIcon.qml
+qml/PathBar.qml
+qml/ColorConfigDialog.qml
+```
+
+The app currently has:
+
+* path bar
+* file list with structured rows
+* sorting headers
+* header context menus
+* row colors / selection / current keyboard row coloring
+* persistent UI settings
+* folder-size background calculation
+* optional symlink following
+* “stale” folder-size state while recalculating
+* remembered last folder
+* in-place model refresh to avoid keyboard current-row reset while folder sizes update
+* planned / latest patch for PgUp/PgDn/Home/End navigation
+
+***
+
+## Confirmed Fixed / Working Behaviors
+
+### Header context menu routing
+
+A previous patch fixed header context menus so the correct header menu opens.
+
+The user confirmed:
+
+> It worked
+
+Likely patch involved routing header context menus through `main.qml` / `FileListView.qml`.
+
+***
+
+### Follow links behavior
+
+Patch series added optional symlink-following.
+
+Files involved:
+
+```text
+src/cxxqt_object.rs
+src/scanner.rs
+src/dir_size_worker.rs
+qml/main.qml
+```
+
+Current intended behavior:
+
+* `Follow links` off:
+  * symlink folders behave as symlink entries
+  * folder size calculation does not descend into nested symlinks
+* `Follow links` on:
+  * symlink folders can be opened/measured
+  * nested symlinks are skipped during folder-size calculation for responsiveness/safety
+  * symlink loops should not hang the app
+
+Important design decision:
+
+* Top-level symlinked folders can be followed/measured.
+* Nested symlink traversal during size calculation is skipped to avoid huge scans / loop-like behavior.
+
+The user confirmed the resulting follow-links behavior / size behavior was fixed.
+
+***
+
+### Folder-size display states
+
+Patch added a `Stale` / `"stale"` folder-size status.
+
+Files involved:
+
+```text
+src/file_size_status.rs
+src/cxxqt_object.rs
+qml/main.qml
+```
+
+Current intended behavior:
+
+* When folder sizes are recalculated, old known folder sizes remain visible.
+* Old sizes are shown in grey / “invalidated” style.
+* When recalculated, updated sizes turn back to normal “done/ok” color.
+* Rows without old sizes show scanning.
+
+This was based on user preference:
+
+> Better would be if all sizes would be shown like invalidated (fx in a grey color) until they have been updated with the real size and given the 'ok' color.
+
+The user confirmed:
+
+> Great
+
+***
+
+### Remember last folder
+
+Patch added persistent last-folder startup path.
+
+File involved:
+
+```text
+qml/main.qml
+```
+
+Concept:
+
+* `uiSettings.currentPath` stores last scanned/opened folder.
+* `savedStartupPath` is loaded at startup.
+* Startup scans `savedStartupPath` if present, otherwise the default controller path.
+
+Expected verification:
+
+1. Open / scan folder.
+2. Close app.
+3. Reopen.
+4. App should start in last scanned folder.
+
+Commit recommendation was:
+
+```bash
+git add qml/main.qml
+git commit -m "Remember last opened folder"
+git push
+```
+
+The user moved on, so assume this was acceptable unless proven otherwise.
+
+***
+
+### Responsiveness during folder-size calculation
+
+Patch added cooperative throttling.
+
+Files involved:
+
+```text
+src/dir_size_worker.rs
+src/cxxqt_object.rs
+```
+
+Current design:
+
+* `calculate_directory_size(...)` yields periodically:
+  * after about every 512 directory entries
+  * `std::thread::sleep(Duration::from_millis(1))`
+* The top-level directory-size job loop sleeps briefly between jobs:
+  * `std::thread::sleep(Duration::from_millis(5))`
+
+Goal:
+
+* Keep UI responsive while folder sizes calculate.
+* Slightly slower folder-size calculation is acceptable.
+
+Commit recommendation was:
+
+```bash
+git add src/dir_size_worker.rs src/cxxqt_object.rs
+git commit -m "Throttle background directory size calculation"
+git push
+```
+
+***
+
+### Current-row reset while folder sizes update
+
+There was a major bug:
+
+* while folder sizes were calculating, repeated model rebuilds caused keyboard current row to reset to row 1/top
+* Down arrow would move a few rows, then snap back
+
+Several failed/partial approaches happened:
+
+1. Tried preserving current row by path around `rebuildRowsFromController()`
+   * failed due to current code structure
+
+2. Tried preserving in `refreshDisplayedRows()`
+   * first used `currentIndex`, but `currentIndex` was not in root scope
+   * fixed to `fileListView.currentIndex`
+
+3. Tried path-based `displayedRows`
+   * failed because `displayedRows` was not in that scope
+
+4. Tried index-only restore
+   * improved behavior but still reset
+
+Final successful fix:
+
+* `refreshDisplayedRows()` now updates existing `ListModel` rows **in place** when the displayed row shape/order is unchanged.
+* It checks:
+  * same row count
+  * same row path at each index
+* If unchanged, it calls:
+
+```qml
+fileModel.setProperty(index, "name", row.name)
+fileModel.setProperty(index, "kind", row.kind)
+fileModel.setProperty(index, "sizeBytes", row.sizeBytes)
+fileModel.setProperty(index, "sizeStatus", row.sizeStatus)
+fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)
+fileModel.setProperty(index, "path", row.path)
+fileModel.setProperty(index, "isDir", row.isDir)
+```
+
+* Only if filter/sort/order/shape changes does it clear and rebuild the model.
+
+The user confirmed:
+
+> Fixed it.
+
+Commit recommendation:
+
+```bash
+git add qml/main.qml
+git commit -m "Update row sizes in place during refreshes"
+git push
+```
+
+***
+
+## Latest Patch Prepared: PgUp / PgDn / Home / End Navigation
+
+The user requested:
+
+> Lets add PgUp and PgDn to move a whole page up and down. Home and End to move the current row to top or bottom. Remember that when shift is pressed we should select everything between the current and the next selected row (page up down ...).
+
+A patch script was generated and syntax-checked:
+
+```text
+patch_page_home_end_navigation.py
+```
+
+Download reference in previous chat:
+
+```text
+turn109file21
+```
+
+Patch target files:
+
+```text
+qml/FileListView.qml
+qml/main.qml
+```
+
+Patch intended behavior:
+
+* `PgDn` → move roughly one visible page down
+* `PgUp` → move roughly one visible page up
+* `Home` → first row
+* `End` → last row
+* `Shift+PgDn`
+* `Shift+PgUp`
+* `Shift+Home`
+* `Shift+End`
+
+All Shift variants should select the range between the selection anchor / current row and destination row.
+
+Implementation concept:
+
+### In `qml/FileListView.qml`
+
+Adds signals:
+
+```qml
+signal pageMoveRequested(int direction, bool extendSelection)
+signal boundaryMoveRequested(int direction, bool extendSelection)
+```
+
+Adds:
+
+```qml
+function pageStep() {
+    return Math.max(1, Math.floor(fileList.height / Math.max(1, rowHeight)) - 1)
+}
+```
+
+Adds handling in `Keys.onPressed` for:
+
+```qml
+Qt.Key_PageDown
+Qt.Key_PageUp
+Qt.Key_Home
+Qt.Key_End
+```
+
+with `event.modifiers & Qt.ShiftModifier`.
+
+### In `qml/main.qml`
+
+Adds helpers:
+
+```qml
+function setCurrentIndexWithOptionalRange(newIndex, extendSelection)
+function pageMoveCurrent(direction, extendSelection)
+function boundaryMoveCurrent(direction, extendSelection)
+```
+
+Selection logic:
+
+* If `extendSelection`:
+  * uses `lastSelectedIndex >= 0 ? lastSelectedIndex : oldIndex` as anchor
+  * selects all `rowPathAt(index)` between anchor and destination
+  * keeps `lastSelectedIndex` as the anchor
+* If not extending:
+  * clears anchor with `lastSelectedIndex = -1`
+* Always updates:
+  * `fileListView.currentIndex`
+  * `fileListView.containIndex(newIndex)`
+  * `fileListView.forceListFocus()`
+
+Adds FileListView instance handlers:
+
+```qml
+onPageMoveRequested: function(direction, extendSelection) {
+    root.pageMoveCurrent(direction, extendSelection)
+}
+
+onBoundaryMoveRequested: function(direction, extendSelection) {
+    root.boundaryMoveCurrent(direction, extendSelection)
+}
+```
+
+Apply latest patch with:
+
+```bash
+cd ~/Downloads
+python3 patch_page_home_end_navigation.py /home/joc/Projects/folder-browser-cxxqt-minimal
+```
+
+Then run:
+
+```bash
+cd /home/joc/Projects/folder-browser-cxxqt-minimal
+QMAKE=/usr/bin/qmake6 cargo run
+```
+
+Verify:
+
+```text
+1. PgDn/PgUp moves roughly one visible page.
+2. Home moves to first row.
+3. End moves to last row.
+4. Shift+PgDn/PgUp/Home/End selects the intended range.
+5. Normal arrow and Shift+arrow behavior still works.
+```
+
+If it works:
+
+```bash
+git add qml/FileListView.qml qml/main.qml
+git commit -m "Add page and boundary keyboard navigation"
+git push
+```
+
+If it fails, inspect:
+
+```bash
+grep -n "PageDown\|PageUp\|Key_Home\|Key_End\|pageMoveRequested\|boundaryMoveRequested\|setCurrentIndexWithOptionalRange" qml/FileListView.qml qml/main.qml
+```
+
+***
+
+## GitHub / Sync Status
+
+The conversation repeatedly gave commit/push commands after successful patches, but the chat does **not** contain a definitive `git status`, `git log`, or `git push` confirmation after every patch.
+
+Known facts:
+
+* The user has been applying patches and confirming behavior.
+* Some patches were confirmed working.
+* It is not fully known from the chat which commits have already been made and pushed.
+
+Recommended first command in a new chat/session:
+
+```bash
+cd /home/joc/Projects/folder-browser-cxxqt-minimal
+git status
+git log --oneline --decorate -10
+```
+
+If needed:
+
+```bash
+git remote -v
+git branch --show-current
+```
+
+Then decide whether to commit outstanding changes.
+
+***
+
+## Development Decisions / Preferences Going Forward
+
+### User preferences
+
+* Use patch scripts, preferably Python.
+* Patch scripts should:
+  * back up changed files
+  * be safe and idempotent where possible
+  * print next steps and rollback/debug hints
+* Keep changes small and test after each patch.
+* Avoid ZIPs unless specifically needed.
+* Keep shell commands practical and copy-pasteable.
+
+### Code direction
+
+Preferred next architectural direction:
+
+1. Avoid rebuilding QML models during high-frequency background updates.
+   * Continue using in-place updates when only row properties change.
+2. Avoid UI reset during background updates.
+   * Preserve `ListView.currentIndex`.
+   * Do not use stale deferred `Qt.callLater` restore logic unless absolutely needed.
+3. Keep folder-size calculation background and cooperative.
+   * Consider future improvements:
+     * only calculate visible rows first
+     * limit concurrent or repeated recalculation
+     * cancel/pause size scans on rapid user navigation
+4. Keep symlink-following safe.
+   * Top-level symlink folders may be followed.
+   * Nested symlinks should remain skipped during size calculation unless explicitly changed.
+5. Continue improving keyboard navigation.
+   * Current active task: PgUp/PgDn/Home/End with Shift range selection.
+
+***
+
+## Important Current Snippets From User’s Source
+
+### `qml/main.qml` around refresh before latest navigation patch
+
+Known current successful model refresh after row-reset fix should resemble this concept:
+
+```qml
+function refreshDisplayedRows() {
+    let rows = sortRows(filterRows(allRows))
+    let sameShape = fileModel.count === rows.length
+
+    if (sameShape) {
+        for (let index = 0; index < rows.length; index += 1) {
+            if (String(fileModel.get(index).path || "") !== String(rows[index].path || "")) {
+                sameShape = false
+                break
+            }
+        }
+    }
+
+    if (sameShape) {
+        for (let index = 0; index < rows.length; index += 1) {
+            let row = rows[index]
+            fileModel.setProperty(index, "name", row.name)
+            fileModel.setProperty(index, "kind", row.kind)
+            fileModel.setProperty(index, "sizeBytes", row.sizeBytes)
+            fileModel.setProperty(index, "sizeStatus", row.sizeStatus)
+            fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)
+            fileModel.setProperty(index, "path", row.path)
+            fileModel.setProperty(index, "isDir", row.isDir)
+        }
+        return
+    }
+
+    let preservedIndex = fileListView.currentIndex
+    fileModel.clear()
+    for (let index = 0; index < rows.length; index += 1) {
+        fileModel.append(rows[index])
+    }
+
+    if (fileModel.count > 0) {
+        fileListView.currentIndex = Math.max(0, Math.min(preservedIndex, fileModel.count - 1))
+    } else {
+        fileListView.currentIndex = -1
+    }
+}
+```
+
+### `qml/FileListView.qml` current index design
+
+The file list has:
+
+```qml
+property int currentIndex: fileList.currentIndex
+readonly property int count: fileList.count
+```
+
+and:
+
+```qml
+onCurrentIndexChanged: {
+    if (fileList.currentIndex !== currentIndex) {
+        fileList.currentIndex = currentIndex
+    }
+}
+```
+
+Inside its internal `ListView`, there is likely:
+
+```qml
+onCurrentIndexChanged: fileListView.currentIndex = currentIndex
+```
+
+So external code should use:
+
+```qml
+fileListView.currentIndex
+```
+
+not plain `currentIndex`.
+
+***
+
+## Known Pitfalls From This Session
+
+Do **not** use an unqualified `currentIndex` in `main.qml`; use:
+
+```qml
+fileListView.currentIndex
+```
+
+Do **not** refer to unqualified `displayedRows` from root-level refresh helpers unless confirmed in scope.
+
+Avoid repeated:
+
+```qml
+fileModel.clear()
+fileModel.append(...)
+```
+
+during folder-size updates, because that resets `ListView.currentIndex`.
+
+Avoid repeated deferred row restore during size updates:
+
+```qml
+Qt.callLater(...)
+```
+
+if the restore is based on stale indices, because it fights keyboard navigation.
+
+***
+
+## Suggested First Steps in New Chat
+
+1. Check current git state:
+
+```bash
+cd /home/joc/Projects/folder-browser-cxxqt-minimal
+git status
+git log --oneline --decorate -10
+```
+
+2. If the PgUp/PgDn/Home/End patch has not been applied yet, apply:
+
+```bash
+cd ~/Downloads
+python3 patch_page_home_end_navigation.py /home/joc/Projects/folder-browser-cxxqt-minimal
+```
+
+3. Run:
+
+```bash
+cd /home/joc/Projects/folder-browser-cxxqt-minimal
+QMAKE=/usr/bin/qmake6 cargo run
+```
+
+4. Verify keyboard navigation.
+
+5. Commit if good:
+
+```bash
+git add qml/FileListView.qml qml/main.qml
+git commit -m "Add page and boundary keyboard navigation"
+git push
+```

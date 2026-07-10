@@ -56,6 +56,7 @@ where
     let mut total: u64 = 0;
     let mut stack: Vec<PathBuf> = vec![directory.to_path_buf()];
     let mut visited_directories: HashSet<PathBuf> = HashSet::new();
+    let mut entries_since_yield: usize = 0;
 
     while let Some(current_directory) = stack.pop() {
         let directory_identity = if follow_symlinks {
@@ -67,6 +68,11 @@ where
 
         let read_dir = match fs::read_dir(&current_directory) { Ok(read_dir) => read_dir, Err(_) => continue };
         for entry_result in read_dir {
+            entries_since_yield += 1;
+            if entries_since_yield >= 512 {
+                entries_since_yield = 0;
+                std::thread::sleep(Duration::from_millis(1));
+            }
             let entry = match entry_result { Ok(entry) => entry, Err(_) => continue };
             let file_type = match entry.file_type() { Ok(file_type) => file_type, Err(_) => continue };
             let path = entry.path();

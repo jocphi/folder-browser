@@ -18,6 +18,15 @@ ApplicationWindow {
 
     property bool previewFilesEnabled: false
     property real previewPaneWidth: 320
+    property bool treePaneVisible: true
+    property real treePaneHeight: 190
+    property int treeCurrentIndex: -1
+    property int treeDirectoryChildCount: 0
+    property var treeExpandedPaths: ({ "/": true })
+    property var treeCachedChildren: ({})
+    property var treeCachedCounts: ({})
+    property var treeCountQueue: []
+    property var treeCountQueued: ({})
     property string previewPendingPath: ""
     property string previewPath: ""
     property string previewMode: "none"
@@ -1026,7 +1035,9 @@ ApplicationWindow {
         } else {
             fileListView.currentIndex = -1
         }
-    }
+    
+        fileListView.resetAfterRowsRebuilt()
+}
 
 
 
@@ -1471,6 +1482,15 @@ ApplicationWindow {
 
 
 
+    function normalizeSidePaneSettings() {
+        if (root.treePaneHeight < 160)
+            root.treePaneHeight = 220
+        if (root.previewPaneWidth < 260)
+            root.previewPaneWidth = 360
+        if (!root.treePaneVisible)
+            root.treePaneVisible = true
+    }
+
     function rememberCurrentSourcePath() {
         let current = String(controller.currentPath || "")
         if (current.length <= 0)
@@ -1513,17 +1533,346 @@ ApplicationWindow {
     }
 
 
+
+    function normalizeTreePath(pathText) {
+        pathText = String(pathText || "")
+        if (pathText.length <= 0)
+            return "/"
+        while (pathText.length > 1 && pathText.endsWith("/"))
+            pathText = pathText.slice(0, -1)
+        return pathText
+    }
+
+    function treeBaseName(pathText) {
+        pathText = root.normalizeTreePath(pathText)
+        if (pathText === "/")
+            return "/"
+        let index = pathText.lastIndexOf("/")
+        return index >= 0 ? pathText.slice(index + 1) : pathText
+    }
+
+    function treeCachedCountForPath(pathText) {
+        pathText = root.normalizeTreePath(pathText)
+        let counts = root.treeCachedCounts || ({})
+        let count = counts[pathText]
+        if (count)
+            return count
+        let children = (root.treeCachedChildren || ({}))[pathText] || []
+        return ({
+            directFileCount: -1,
+            recursiveFileCount: -1,
+            directFolderCount: children.length >= 0 ? children.length : -1,
+            recursiveFolderCount: -1,
+            countsDone: false,
+            countsScanning: true
+        })
+    }
+
+    function treeSetCachedCount(pathText, count) {
+        pathText = root.normalizeTreePath(pathText)
+        let counts = root.treeCachedCounts || ({})
+        counts[pathText] = count
+        root.treeCachedCounts = counts
+        root.treeApplyCountToModel(pathText, count)
+    }
+
+    function treeApplyCountToModel(pathText, count) {
+        pathText = root.normalizeTreePath(pathText)
+        if (!treeModel)
+            return
+        for (let index = 0; index < treeModel.count; index += 1) {
+            if (root.normalizeTreePath(treeModel.get(index).path || "") !== pathText)
+                continue
+            treeModel.setProperty(index, "directFileCount", Number(count.directFileCount ?? -1))
+            treeModel.setProperty(index, "recursiveFileCount", Number(count.recursiveFileCount ?? -1))
+            treeModel.setProperty(index, "directFolderCount", Number(count.directFolderCount ?? -1))
+            treeModel.setProperty(index, "recursiveFolderCount", Number(count.recursiveFolderCount ?? -1))
+            treeModel.setProperty(index, "countsDone", Boolean(count.countsDone))
+            treeModel.setProperty(index, "countsScanning", count.countsScanning !== false)
+            return
+        }
+    }
+
+    function treeComputeKnownRecursiveCounts(pathText, visited) {
+        pathText = root.normalizeTreePath(pathText)
+        if (visited[pathText])
+            return ({ files: 0, folders: 0, complete: true })
+        visited[pathText] = true
+
+        let counts = root.treeCachedCounts || ({})
+        let childrenCache = root.treeCachedChildren || ({})
+        let direct = counts[pathText]
+        let children = childrenCache[pathText]
+
+        if (!direct || children === undefined) {
+            return ({ files: 0, folders: 0, complete: false })
+        }
+
+        let files = Math.max(0, Number(direct.directFileCount || 0))
+        let folders = Math.max(0, Number(direct.directFolderCount || 0))
+        let complete = true
+
+        for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+            let child = children[childIndex]
+            let childResult = root.treeComputeKnownRecursiveCounts(child.path, visited)
+            files += childResult.files
+            folders += childResult.folders
+            if (!childResult.complete)
+                complete = false
+        }
+
+        return ({ files: files, folders: folders, complete: complete })
+    }
+
+    function treeQueueCountPath(pathText) {
+        pathText = root.normalizeTreePath(pathText)
+        if (pathText.length <= 0)
+            return
+        let queued = root.treeCountQueued || ({})
+        if (queued[pathText])
+            return
+        queued[pathText] = true
+        root.treeCountQueued = queued
+        let queue = root.treeCountQueue.slice()
+        queue.push(pathText)
+        root.treeCountQueue = queue
+        treeCountTimer.restart()
+    }
+
+    function treeQueueVisibleCounts() {
+        if (!treeModel)
+            return
+        let queued = root.treeCountQueued || ({})
+        let queue = root.treeCountQueue.slice()
+        for (let index = 0; index < treeModel.count; index += 1) {
+            let pathText = root.normalizeTreePath(treeModel.get(index).path || "")
+            if (pathText.length <= 0 || queued[pathText])
+                continue
+            queued[pathText] = true
+            queue.push(pathText)
+        }
+        root.treeCountQueued = queued
+        root.treeCountQueue = queue
+        if (queue.length > 0)
+            treeCountTimer.restart()
+    }
+
+    function treeProcessNextCount() {
+        let queue = root.treeCountQueue.slice()
+        if (queue.length <= 0)
+            return
+        let pathText = root.normalizeTreePath(queue.shift())
+        let queued = root.treeCountQueued || ({})
+        delete queued[pathText]
+        root.treeCountQueued = queued
+        root.treeCountQueue = queue
+
+        let direct = root.treeCachedCountForPath(pathText)
+        let recursive = root.treeComputeKnownRecursiveCounts(pathText, ({}))
+        let count = ({
+            directFileCount: Number(direct.directFileCount ?? -1),
+            recursiveFileCount: recursive.complete ? Math.max(0, recursive.files - Math.max(0, Number(direct.directFileCount || 0))) : -1,
+            directFolderCount: Number(direct.directFolderCount ?? -1),
+            recursiveFolderCount: recursive.complete ? Math.max(0, recursive.folders - Math.max(0, Number(direct.directFolderCount || 0))) : -1,
+            countsDone: Boolean(recursive.complete),
+            countsScanning: !recursive.complete
+        })
+        root.treeSetCachedCount(pathText, count)
+
+        if (root.treeCountQueue.length > 0)
+            treeCountTimer.restart()
+    }
+
+    function treeCountNumber(value) {
+        value = Number(value)
+        return Number.isFinite(value) && value >= 0 ? String(value) : "?"
+    }
+
+    function treeCountSummary(directFiles, recursiveFiles, directFolders, recursiveFolders) {
+        return "(" + root.treeCountNumber(directFiles)
+             + "/" + root.treeCountNumber(recursiveFiles)
+             + " files - " + root.treeCountNumber(directFolders)
+             + "/" + root.treeCountNumber(recursiveFolders)
+             + " folders)"
+    }
+
+    function treeCountColor(countsDone) {
+        return countsDone ? root.sizeDoneColor : root.sizeScanningColor
+    }
+
+    function scrollTreeCurrentIntoView() {
+        if (!treeListView || !treeModel)
+            return
+        let targetTreeIndex = root.treeCurrentIndex
+        if (targetTreeIndex < 0 || targetTreeIndex >= treeModel.count)
+            return
+        Qt.callLater(function() {
+            if (targetTreeIndex >= 0 && targetTreeIndex < treeModel.count)
+                treeListView.positionViewAtIndex(targetTreeIndex, ListView.Contain)
+        })
+    }
+
+    function treeEnsureChild(parentPath, childPath, childName) {
+        parentPath = root.normalizeTreePath(parentPath)
+        childPath = root.normalizeTreePath(childPath)
+        let cache = root.treeCachedChildren || ({})
+        let children = cache[parentPath] || []
+        for (let index = 0; index < children.length; index += 1) {
+            if (String(children[index].path || "") === childPath)
+                return
+        }
+        children.push(({ name: childName, path: childPath, isDir: true }))
+        children.sort(function(left, right) {
+            return String(left.name || "").toLowerCase().localeCompare(String(right.name || "").toLowerCase())
+        })
+        cache[parentPath] = children
+        root.treeCachedChildren = cache
+    }
+
+    function treeEnsureExpandedPath(pathText) {
+        pathText = root.normalizeTreePath(pathText)
+        let expanded = root.treeExpandedPaths || ({})
+        expanded["/"] = true
+
+        if (pathText !== "/") {
+            let parts = pathText.split("/")
+            let parent = "/"
+            let running = ""
+            for (let index = 1; index < parts.length; index += 1) {
+                let part = parts[index]
+                if (part.length <= 0)
+                    continue
+                running += "/" + part
+                root.treeEnsureChild(parent, running, part)
+                expanded[running] = true
+                parent = running
+            }
+        }
+
+        root.treeExpandedPaths = expanded
+    }
+
+    function treeCacheCurrentFolderChildren() {
+        let currentPath = root.normalizeTreePath(controller.currentPath)
+        let cache = root.treeCachedChildren || ({})
+        let counts = root.treeCachedCounts || ({})
+        let children = []
+        let directFileCount = 0
+        let directFolderCount = 0
+
+        for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
+            let row = fileModel.get(rowIndex)
+            if (!row)
+                continue
+            let name = String(row.name || "")
+            if (name === "..")
+                continue
+
+            if (row.isDir) {
+                directFolderCount += 1
+                let pathText = root.normalizeTreePath(row.path || "")
+                if (pathText.length > 0 && pathText !== currentPath)
+                    children.push(({ name: name, path: pathText, isDir: true }))
+            } else {
+                directFileCount += 1
+            }
+        }
+
+        cache[currentPath] = children
+        counts[currentPath] = ({
+            directFileCount: directFileCount,
+            recursiveFileCount: -1,
+            directFolderCount: directFolderCount,
+            recursiveFolderCount: -1,
+            countsDone: false,
+            countsScanning: true
+        })
+        root.treeCachedChildren = cache
+        root.treeCachedCounts = counts
+        root.treeDirectoryChildCount = directFolderCount
+        root.treeQueueCountPath(currentPath)
+
+    }
+
+    function treeAppendPath(pathText, depth, visited) {
+        pathText = root.normalizeTreePath(pathText)
+        if (visited[pathText])
+            return
+        visited[pathText] = true
+
+        let currentPath = root.normalizeTreePath(controller.currentPath)
+        let children = (root.treeCachedChildren || ({}))[pathText] || []
+        let counts = (root.treeCachedCounts || ({}))[pathText] || ({
+            directFileCount: -1,
+            recursiveFileCount: -1,
+            directFolderCount: children.length >= 0 ? children.length : -1,
+            recursiveFolderCount: -1,
+            countsDone: false,
+            countsScanning: true
+        })
+        let expanded = Boolean((root.treeExpandedPaths || ({}))[pathText])
+        let isCurrent = pathText === currentPath
+        let rowIndex = treeModel.count
+        if (isCurrent)
+            root.treeCurrentIndex = rowIndex
+
+        treeModel.append({
+            name: root.treeBaseName(pathText),
+            path: pathText,
+            depth: depth,
+            current: isCurrent,
+            isDir: true,
+            branch: expanded,
+            childCount: children.length >= 0 ? children.length : -1,
+            directFileCount: Number(counts.directFileCount || -1),
+            recursiveFileCount: Number(counts.recursiveFileCount || -1),
+            directFolderCount: Number(counts.directFolderCount || -1),
+            recursiveFolderCount: Number(counts.recursiveFolderCount || -1),
+            countsDone: Boolean(counts.countsDone),
+            countsScanning: counts.countsScanning !== false
+        })
+
+        if (!expanded)
+            return
+
+        for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+            let child = children[childIndex]
+            root.treeAppendPath(child.path, depth + 1, visited)
+        }
+    }
+
+    function rebuildTreeModel() {
+        if (!treeModel)
+            return
+
+        treeModel.clear()
+        root.treeCurrentIndex = -1
+        root.treeEnsureExpandedPath(controller.currentPath)
+        root.treeCacheCurrentFolderChildren()
+        root.treeAppendPath("/", 0, ({}))
+        root.treeQueueVisibleCounts()
+
+    }
+
     FolderBrowserController {
         id: controller
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
         statusText: "Ready"
         rowCount: 0
         updateGeneration: 0
-        onUpdateGenerationChanged: rebuildRowsFromController()
+        onUpdateGenerationChanged: {
+            rebuildRowsFromController()
+            root.rebuildTreeModel()
+        }
     }
 
     ListModel {
         id: fileModel
+    }
+
+
+    ListModel {
+        id: treeModel
     }
 
 
@@ -1564,6 +1913,8 @@ ApplicationWindow {
         property bool followSymlinks: false
         property alias previewFilesEnabled: root.previewFilesEnabled
         property alias previewPaneWidth: root.previewPaneWidth
+        property alias treePaneVisible: root.treePaneVisible
+        property alias treePaneHeight: root.treePaneHeight
         property string filterText: ""
         property string currentPath: ""
         property string browserSource: "Filesystem"
@@ -1601,6 +1952,13 @@ ApplicationWindow {
 
 
     Timer {
+        id: treeCountTimer
+        interval: 25
+        repeat: false
+        onTriggered: root.treeProcessNextCount()
+    }
+
+    Timer {
         id: rowsRebuildTimer
         interval: 250
         repeat: false
@@ -1620,6 +1978,7 @@ ApplicationWindow {
     Component.onCompleted: {
         loadColorSettings()
         loadInterfaceSettings()
+        normalizeSidePaneSettings()
         scanPath(savedStartupPath.length > 0 ? savedStartupPath : controller.currentPath)
     }
 
@@ -1712,16 +2071,30 @@ ApplicationWindow {
             }
         }
 
-        CheckBox {
-            id: previewFilesCheckBox
-            text: "Preview files"
-            checked: root.previewFilesEnabled
-            onToggled: {
-                root.previewFilesEnabled = checked
-                if (checked)
-                    root.previewCurrentRow()
-                else
-                    root.clearPreview("Preview disabled")
+        RowLayout {
+            id: sidePanelControls
+            Layout.fillWidth: true
+            spacing: 12
+
+            CheckBox {
+                id: treePaneCheckBox
+                text: "Tree"
+                checked: root.treePaneVisible
+                onToggled: root.treePaneVisible = checked
+            }
+
+            CheckBox {
+                id: previewFilesCheckBox
+                text: "Preview files"
+                checked: root.previewFilesEnabled
+                enabled: root.treePaneVisible
+                onToggled: {
+                    root.previewFilesEnabled = checked
+                    if (checked)
+                        root.previewCurrentRow()
+                    else
+                        root.clearPreview("Preview disabled")
+                }
             }
         }
 
@@ -1776,6 +2149,7 @@ ApplicationWindow {
             sizeColorFunction: root.sizeColor
             modifiedTextFunction: root.modifiedText
             onCurrentIndexChanged: root.previewCurrentRow()
+            onListFocusGained: root.scrollTreeCurrentIntoView()
             onSortRequested: function(columnName) { root.setSort(columnName) }
             onHeaderMenuRequested: function(columnName, sceneX, sceneY) { root.openHeaderMenu(columnName, sceneX, sceneY) }
             onOpenCurrentRequested: root.openCurrentRow()
@@ -1799,7 +2173,7 @@ ApplicationWindow {
         }
             Rectangle {
                 id: previewResizeHandle
-                visible: root.previewFilesEnabled
+                visible: root.treePaneVisible
                 Layout.fillHeight: true
                 Layout.preferredWidth: 6
                 color: previewHandleMouse.containsMouse || previewHandleMouse.pressed ? root.activeSortBorderColor : root.panelBorderColor
@@ -1816,16 +2190,16 @@ ApplicationWindow {
                     }
                     onPositionChanged: {
                         if (pressed)
-                            root.previewPaneWidth = Math.max(180, Math.min(760, startWidth - (mouseX - startX)))
+                            root.previewPaneWidth = Math.max(260, Math.min(900, startWidth - (mouseX - startX)))
                     }
                 }
             }
 
             Rectangle {
-                id: previewPane
-                visible: root.previewFilesEnabled
+                id: sidePane
+                visible: root.treePaneVisible
                 Layout.fillHeight: true
-                Layout.preferredWidth: root.previewPaneWidth
+                Layout.preferredWidth: Math.max(260, root.previewPaneWidth)
                 color: root.panelBackgroundColor
                 border.color: root.panelBorderColor
                 radius: 8
@@ -1836,115 +2210,333 @@ ApplicationWindow {
                     anchors.margins: 10
                     spacing: 8
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: root.previewTitleText()
-                            color: root.headerTextColor
-                            font.bold: true
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                        }
-                        Button {
-                            text: "×"
-                            Layout.preferredWidth: 28
-                            onClicked: root.previewFilesEnabled = false
-                        }
-                    }
-
-                    Label {
-                        text: root.previewStatusText
-                        color: root.secondaryTextColor
-                        Layout.fillWidth: true
-                        elide: Text.ElideMiddle
-                    }
-
-
-                    RowLayout {
-                        visible: root.previewMode === "video" || (fileListView.currentIndex >= 0 && fileModel.count > fileListView.currentIndex && String(fileModel.get(fileListView.currentIndex).mimeType || "").indexOf("video/") === 0)
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        CheckBox {
-                            text: "Video slideshow"
-                            checked: root.previewVideoSlideshowEnabled
-                            onToggled: {
-                                root.previewVideoSlideshowEnabled = checked
-                                if (checked) {
-                                    if (root.previewVideoFrames.length > 1)
-                                        previewSlideTimer.restart()
-                                    else
-                                        root.previewCurrentRow()
-                                } else {
-                                    previewSlideTimer.stop()
-                                    root.previewShowVideoFrame(root.previewVideoFrameIndex)
-                                }
-                            }
-                        }
-
-                        Slider {
-                            id: previewVideoTimelineSlider
-                            Layout.fillWidth: true
-                            from: 0
-                            to: Math.max(0, root.previewVideoFrames.length - 1)
-                            stepSize: 1
-                            snapMode: Slider.SnapAlways
-                            enabled: !root.previewVideoSlideshowEnabled && root.previewVideoFrames.length > 1
-                            value: root.previewVideoFrameIndex
-                            onMoved: root.previewShowVideoFrame(Math.round(value))
-                        }
-
-                        Label {
-                            text: root.previewVideoTimelinePercent() + "%"
-                            color: root.secondaryTextColor
-                            Layout.preferredWidth: 44
-                            horizontalAlignment: Text.AlignRight
-                        }
-                    }
-
-
                     Rectangle {
+                        id: treePane
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        color: Qt.darker(root.panelBackgroundColor, 1.08)
+                        Layout.fillHeight: !root.previewFilesEnabled
+                        Layout.preferredHeight: root.previewFilesEnabled ? Math.max(160, root.treePaneHeight) : -1
+                        color: Qt.darker(root.panelBackgroundColor, 1.04)
                         border.color: root.panelBorderColor
                         radius: 6
                         clip: true
 
-                        ScrollView {
-                            visible: root.previewMode === "text"
+                        ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: 6
-                            clip: true
+                            anchors.margins: 8
+                            spacing: 6
 
-                            TextEdit {
-                                id: previewTextEdit
-                                text: root.previewTextContent
-                                readOnly: true
-                                selectByMouse: true
-                                wrapMode: TextEdit.NoWrap
-                                color: root.fileTextColor
-                                font.family: root.rowFontFamily
-                                textFormat: TextEdit.PlainText
-                                width: Math.max(parent.width, implicitWidth)
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: root.browserSource + " tree  •  " + String(root.treeDirectoryChildCount) + " folders here"
+                                    color: root.headerTextColor
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+                                Button {
+                                    text: "×"
+                                    Layout.preferredWidth: 28
+                                    onClicked: root.treePaneVisible = false
+                                }
+                            }
+
+                            ListView {
+                                id: treeListView
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: treeModel
+                                boundsBehavior: Flickable.StopAtBounds
+
+
+                                MouseArea {
+
+
+                                Item {
+                                    id: treeVerticalScrollBarOverlay
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.right: parent.right
+                                    width: 14
+                                    z: 90
+                                    visible: treeListView.contentHeight > treeListView.height
+
+                                    Rectangle {
+                                        id: treeVerticalScrollTrack
+                                        anchors.fill: parent
+                                        anchors.margins: 1
+                                        radius: 6
+                                        color: Qt.rgba(1, 1, 1, 0.10)
+                                        border.color: Qt.rgba(1, 1, 1, 0.18)
+                                        border.width: 1
+                                    }
+
+                                    Rectangle {
+                                        id: treeVerticalScrollThumb
+                                        width: 10
+                                        x: 2
+                                        radius: 5
+                                        height: Math.max(34, treeVerticalScrollBarOverlay.height * treeListView.height / Math.max(1, treeListView.contentHeight))
+                                        y: treeListView.contentHeight <= treeListView.height
+                                           ? 0
+                                           : Math.max(0, Math.min(treeVerticalScrollBarOverlay.height - height,
+                                               (treeListView.contentY / Math.max(1, treeListView.contentHeight - treeListView.height))
+                                               * (treeVerticalScrollBarOverlay.height - height)))
+                                        color: treeVerticalScrollMouse.pressed
+                                               ? root.activeSortBorderColor
+                                               : (treeVerticalScrollMouse.containsMouse
+                                                  ? Qt.lighter(root.activeSortBorderColor, 1.18)
+                                                  : Qt.rgba(0.75, 0.82, 0.92, 0.72))
+                                        border.color: Qt.rgba(0, 0, 0, 0.30)
+                                        border.width: 1
+                                    }
+
+                                    MouseArea {
+                                        id: treeVerticalScrollMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.SizeVerCursor
+
+                                        function moveTo(localY) {
+                                            treeListView.cancelFlick()
+                                            let maxContentY = Math.max(0, treeListView.contentHeight - treeListView.height)
+                                            let maxThumbY = Math.max(1, treeVerticalScrollBarOverlay.height - treeVerticalScrollThumb.height)
+                                            let thumbY = Math.max(0, Math.min(maxThumbY, localY - treeVerticalScrollThumb.height / 2))
+                                            treeListView.contentY = maxContentY * thumbY / maxThumbY
+                                        }
+
+                                        onPressed: function(mouse) { moveTo(mouse.y) }
+                                        onPositionChanged: function(mouse) {
+                                            if (pressed)
+                                                moveTo(mouse.y)
+                                        }
+                                    }
+                                }
+                                    id: treeWheelMouseArea
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.NoButton
+                                    hoverEnabled: false
+                                    propagateComposedEvents: true
+                                    z: 10
+                                    onWheel: function(wheel) {
+                                        treeListView.cancelFlick()
+                                        let maxY = Math.max(0, treeListView.contentHeight - treeListView.height)
+                                        let step = wheel.angleDelta.y * 3.0
+                                        treeListView.contentY = Math.max(0, Math.min(maxY, treeListView.contentY - step))
+                                        wheel.accepted = true
+                                    }
+                                }
+
+                                delegate: Rectangle {
+                                    width: treeListView.width
+                                    height: 26
+                                    radius: 4
+                                    color: model.current
+                                           ? root.keyboardCurrentRowColor
+                                           : (model.branch ? Qt.rgba(0.25, 0.32, 0.42, 0.35)
+                                                           : (treeRowMouse.containsMouse ? root.activeSortColumnColor : "transparent"))
+                                    border.color: model.current ? root.activeSortBorderColor : "transparent"
+                                    border.width: model.current ? 1 : 0
+
+                                    Row {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 6
+
+                                        Item {
+                                            width: Math.max(0, Number(model.depth || 0)) * 14
+                                            height: parent.height
+                                        }
+
+                                        Label {
+                                            width: 18
+                                            text: model.branch ? "▾" : "▸"
+                                            color: root.secondaryTextColor
+                                            font.family: root.rowFontFamily
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+
+                                        Label {
+                                            text: model.name
+                                            color: model.current ? root.fileTextColor : root.folderTextColor
+                                            font.family: root.rowFontFamily
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideMiddle
+                                            width: Math.max(40, treeListView.width - (Number(model.depth || 0) * 14) - 220)
+                                        }
+
+                                        Label {
+                                            text: root.treeCountSummary(model.directFileCount,
+                                                                        model.recursiveFileCount,
+                                                                        model.directFolderCount,
+                                                                        model.recursiveFolderCount)
+                                            color: root.treeCountColor(Boolean(model.countsDone))
+                                            font.family: root.rowFontFamily
+                                            verticalAlignment: Text.AlignVCenter
+                                            width: 170
+                                            horizontalAlignment: Text.AlignRight
+                                            elide: Text.ElideRight
+                                        }                                    }
+
+                                    MouseArea {
+                                        id: treeRowMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: root.scanPath(model.path)
+                                    }
+                                }
+                            }
+
+                        }
+                    }
+
+                    Rectangle {
+                        id: previewTreeSplitter
+                        visible: root.previewFilesEnabled
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 6
+                        color: treePreviewSplitterMouse.containsMouse || treePreviewSplitterMouse.pressed ? root.activeSortBorderColor : root.panelBorderColor
+                        MouseArea {
+                            id: treePreviewSplitterMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.SizeVerCursor
+                            property real startY: 0
+                            property real startHeight: 0
+                            onPressed: {
+                                startY = mouseY
+                                startHeight = root.treePaneHeight
+                            }
+                            onPositionChanged: {
+                                if (pressed)
+                                    root.treePaneHeight = Math.max(160, Math.min(sidePane.height - 180, startHeight + (mouseY - startY)))
                             }
                         }
+                    }
 
-                        Image {
-                            visible: root.previewMode === "image" || root.previewMode === "video"
+                    Rectangle {
+                        id: previewPane
+                        visible: root.previewFilesEnabled
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: "transparent"
+                        clip: true
+
+                        ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: 6
-                            source: root.previewImageSource
-                            fillMode: Image.PreserveAspectFit
-                            asynchronous: true
-                            cache: false
-                        }
+                            spacing: 8
 
-                        Label {
-                            visible: root.previewMode === "none"
-                            anchors.centerIn: parent
-                            text: root.previewStatusText
-                            color: root.secondaryTextColor
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: root.previewTitleText()
+                                    color: root.headerTextColor
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+                                Button {
+                                    text: "×"
+                                    Layout.preferredWidth: 28
+                                    onClicked: root.previewFilesEnabled = false
+                                }
+                            }
+
+                            Label {
+                                text: root.previewStatusText
+                                color: root.secondaryTextColor
+                                Layout.fillWidth: true
+                                elide: Text.ElideMiddle
+                            }
+
+                            RowLayout {
+                                visible: root.previewMode === "video" || (fileListView.currentIndex >= 0 && fileModel.count > fileListView.currentIndex && String(fileModel.get(fileListView.currentIndex).mimeType || "").indexOf("video/") === 0)
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                CheckBox {
+                                    text: "Video slideshow"
+                                    checked: root.previewVideoSlideshowEnabled
+                                    onToggled: {
+                                        root.previewVideoSlideshowEnabled = checked
+                                        if (checked) {
+                                            if (root.previewVideoFrames.length > 1)
+                                                previewSlideTimer.restart()
+                                            else
+                                                root.previewCurrentRow()
+                                        } else {
+                                            previewSlideTimer.stop()
+                                            root.previewShowVideoFrame(root.previewVideoFrameIndex)
+                                        }
+                                    }
+                                }
+
+                                Slider {
+                                    id: previewVideoTimelineSlider
+                                    Layout.fillWidth: true
+                                    from: 0
+                                    to: Math.max(0, root.previewVideoFrames.length - 1)
+                                    stepSize: 1
+                                    snapMode: Slider.SnapAlways
+                                    enabled: !root.previewVideoSlideshowEnabled && root.previewVideoFrames.length > 1
+                                    value: root.previewVideoFrameIndex
+                                    onMoved: root.previewShowVideoFrame(Math.round(value))
+                                }
+
+                                Label {
+                                    text: root.previewVideoTimelinePercent() + "%"
+                                    color: root.secondaryTextColor
+                                    Layout.preferredWidth: 44
+                                    horizontalAlignment: Text.AlignRight
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                color: Qt.darker(root.panelBackgroundColor, 1.08)
+                                border.color: root.panelBorderColor
+                                radius: 6
+                                clip: true
+
+                                ScrollView {
+                                    visible: root.previewMode === "text"
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    clip: true
+
+                                    TextEdit {
+                                        id: previewTextEdit
+                                        text: root.previewTextContent
+                                        readOnly: true
+                                        selectByMouse: true
+                                        wrapMode: TextEdit.NoWrap
+                                        color: root.fileTextColor
+                                        font.family: root.rowFontFamily
+                                        textFormat: TextEdit.PlainText
+                                        width: Math.max(parent.width, implicitWidth)
+                                    }
+                                }
+
+                                Image {
+                                    visible: root.previewMode === "image" || root.previewMode === "video"
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    source: root.previewImageSource
+                                    fillMode: Image.PreserveAspectFit
+                                    asynchronous: true
+                                    cache: false
+                                }
+
+                                Label {
+                                    visible: root.previewMode === "none"
+                                    anchors.centerIn: parent
+                                    text: root.previewStatusText
+                                    color: root.secondaryTextColor
+                                }
+                            }
                         }
                     }
                 }

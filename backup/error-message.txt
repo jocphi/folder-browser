@@ -1,0 +1,51 @@
+QMAKE=/usr/bin/qmake6 cargo run
+   Compiling folder-browser-cxxqt-minimal v0.1.0 (/home/joc/Projects/folder-browser-cxxqt-minimal)
+warning: folder-browser-cxxqt-minimal@0.1.0: In file included from /usr/include/qt6/QtCore/qstring.h:15,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/qhashfunctions.h:10,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/qlist.h:12,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/qstringlist.h:6,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/QStringList:1,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /home/joc/Projects/folder-browser-cxxqt-minimal/target/debug/build/folder-browser-cxxqt-minimal-f0340d1f5b30cbf2/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:11,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /home/joc/Projects/folder-browser-cxxqt-minimal/target/debug/build/folder-browser-cxxqt-minimal-f0340d1f5b30cbf2/out/cxxqtbuild/include/cxx-qt-lib/qstring.h:9,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /home/joc/Projects/folder-browser-cxxqt-minimal/target/debug/build/folder-browser-cxxqt-minimal-f0340d1f5b30cbf2/out/cxxqtgen/src/cxxqt_object.cxx.cpp:1:
+warning: folder-browser-cxxqt-minimal@0.1.0: /usr/include/qt6/QtCore/qchar.h:48:31: warning: defining 'QChar', which previously failed to be complete in a SFINAE context [-Wsfinae-incomplete=]
+warning: folder-browser-cxxqt-minimal@0.1.0:    48 | class QT6_ONLY(Q_CORE_EXPORT) QChar {
+warning: folder-browser-cxxqt-minimal@0.1.0:       |                               ^~~~~
+warning: folder-browser-cxxqt-minimal@0.1.0: In file included from /usr/include/c++/16/unordered_map:44,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/c++/16/functional:80,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/qcomparehelpers.h:29,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/qcompare.h:661,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/qnamespace.h:14,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/qbytearray.h:10,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /usr/include/qt6/QtCore/QByteArray:1,
+warning: folder-browser-cxxqt-minimal@0.1.0:                  from /home/joc/Projects/folder-browser-cxxqt-minimal/target/debug/build/folder-browser-cxxqt-minimal-f0340d1f5b30cbf2/out/cxxqtbuild/include/cxx-qt-lib/core/qstring.h:10:
+warning: folder-browser-cxxqt-minimal@0.1.0: /usr/include/c++/16/bits/range_access.h:325:24: note: here.  Use '-Wsfinae-incomplete=2' for a diagnostic at that point
+warning: folder-browser-cxxqt-minimal@0.1.0:   325 |     -> decltype(__cont.data())
+warning: folder-browser-cxxqt-minimal@0.1.0:       |                 ~~~~~~~^~~~
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.86s
+     Running `target/debug/folder-browser-cxxqt-minimal`
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:242:5: QML QQuickItem* (parent or ancestor of QQuickDragAttached): Binding loop detected for property "active":
+qrc:/qt/qml/dk/john/folderbrowser/qml/RowDelegate.qml:249:9
+fish: Job 1, 'QMAKE=/usr/bin/qmake6 cargo run' terminated by signal SIGKILL (Forced quit)

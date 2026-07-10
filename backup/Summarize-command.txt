@@ -1,0 +1,1 @@
+Summarize this chat, the state of the folder-browser-cxxqt-minimal source code, the synced github and decicsions made for further developement, in a way that the output can be used to paste into a new chat, so I can continue from this state of developement.
