@@ -6,7 +6,11 @@
 pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
+        include!("folder-browser-cxxqt-minimal/src/native_file_model.h");
         type QString = cxx_qt_lib::QString;
+
+        #[cxx_name = "registerNativeFileModel"]
+        fn register_native_file_model();
     }
 
     extern "RustQt" {
@@ -17,6 +21,8 @@ pub mod qobject {
         #[qproperty(QString, status_text, cxx_name = "statusText")]
         #[qproperty(i32, row_count, cxx_name = "rowCount")]
         #[qproperty(i32, update_generation, cxx_name = "updateGeneration")]
+        #[qproperty(i32, native_row_update_index, cxx_name = "nativeRowUpdateIndex")]
+        #[qproperty(i32, native_row_update_generation, cxx_name = "nativeRowUpdateGeneration")]
         #[qproperty(bool, follow_symlinks, cxx_name = "followSymlinks")]
         #[qproperty(bool, is_scanning, cxx_name = "isScanning")]
         #[qproperty(i32, tree_count_result_generation, cxx_name = "treeCountResultGeneration")]
@@ -25,6 +31,8 @@ pub mod qobject {
         #[qproperty(QString, live_check_result_json, cxx_name = "liveCheckResultJson")]
         #[qproperty(i32, size_scan_done, cxx_name = "sizeScanDone")]
         #[qproperty(i32, size_scan_total, cxx_name = "sizeScanTotal")]
+        #[qproperty(i32, analysis_scan_done, cxx_name = "analysisScanDone")]
+        #[qproperty(i32, analysis_scan_total, cxx_name = "analysisScanTotal")]
         #[qproperty(i32, preview_result_generation, cxx_name = "previewResultGeneration")]
         #[qproperty(QString, preview_mode, cxx_name = "previewMode")]
         #[qproperty(QString, preview_status, cxx_name = "previewStatus")]
@@ -34,6 +42,10 @@ pub mod qobject {
         #[qproperty(bool, preview_working, cxx_name = "previewWorking")]
         #[namespace = "folder_browser"]
         type FolderBrowserController = super::FolderBrowserControllerRust;
+
+        #[qinvokable]
+        #[cxx_name = "logPerformanceEvent"]
+        fn log_performance_event(&self, event: &QString, details: &QString);
 
         #[qinvokable]
         #[cxx_name = "incrementClickCount"]
@@ -48,8 +60,32 @@ pub mod qobject {
         fn scan_path(self: Pin<&mut Self>, path: &QString);
 
         #[qinvokable]
+        #[cxx_name = "familyDescriptorForPath"]
+        fn family_descriptor_for_path(&self, path: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "setFamilyDescriptor"]
+        fn set_family_descriptor(self: Pin<&mut Self>, path: &QString, descriptor: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "removeFamilyDescriptor"]
+        fn remove_family_descriptor(self: Pin<&mut Self>, path: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "listFamilyDescriptorsJson"]
+        fn list_family_descriptors_json(&self) -> QString;
+
+        #[qinvokable]
         #[cxx_name = "scanDatabasePath"]
         fn scan_database_path(self: Pin<&mut Self>, path: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "refreshDatabaseFolder"]
+        fn refresh_database_folder(self: Pin<&mut Self>, path: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "fullRefreshDatabaseSubtree"]
+        fn full_refresh_database_subtree(self: Pin<&mut Self>, path: &QString);
 
         #[qinvokable]
         #[cxx_name = "trashPaths"]
@@ -90,6 +126,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "fileName"]
         fn file_name(&self, row: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fileFamilyDescriptor"]
+        fn file_family_descriptor(&self, row: i32) -> QString;
 
         #[qinvokable]
         #[cxx_name = "fileKind"]
@@ -178,8 +218,9 @@ use crate::formatting::normalize_local_path;
 use crate::file_row::FileRow;
 use crate::file_size_status::{DirectorySizeStatusUpdate, SizeStatus};
 use crate::scanner::{probe_mime_type, scan_directory};
-use crate::database_browser::{scan_database_directory, count_database_tree_path};
+use crate::database_browser::{count_database_tree_path, family_descriptor_for_path, list_family_descriptors_json, populate_family_descriptors, remove_family_descriptor_for_path, scan_database_directory, set_family_descriptor_for_path};
 use crate::signals::bump_update_generation;
+use crate::performance_log::log_event;
 use crate::media_metadata::{apply_media_metadata, is_media_path, mark_media_metadata_unavailable, probe_media_metadata};
 use crate::dir_size_worker::{calculate_directory_size, DirectorySizeBatch};
 use crate::tree_count_worker::{count_tree_path, tree_count_json};
@@ -193,6 +234,8 @@ pub struct FolderBrowserControllerRust {
     status_text: QString,
     row_count: i32,
     update_generation: i32,
+    native_row_update_index: i32,
+    native_row_update_generation: i32,
     follow_symlinks: bool,
     is_scanning: bool,
     tree_count_result_generation: i32,
@@ -201,6 +244,9 @@ pub struct FolderBrowserControllerRust {
     live_check_result_json: QString,
     size_scan_done: i32,
     size_scan_total: i32,
+    analysis_scan_done: i32,
+    analysis_scan_total: i32,
+    analysis_scan_done_internal: i32,
     preview_result_generation: i32,
     preview_mode: QString,
     preview_status: QString,
@@ -210,8 +256,36 @@ pub struct FolderBrowserControllerRust {
     preview_working: bool,
     pub(crate) rows: Vec<FileRow>,
     pub(crate) scan_generation: u64,
+    // Small in-memory cache of recently visited filesystem folders. Cached rows are
+    // displayed immediately while a shallow refresh runs in the background.
+    pub(crate) folder_cache: std::collections::HashMap<String, Vec<FileRow>>,
+    pub(crate) folder_cache_order: std::collections::VecDeque<String>,
     pub(crate) preview_generation: u64,
     pub(crate) live_check_generation: u64,
+}
+
+const MAX_FOLDER_CACHE_ENTRIES: usize = 16;
+
+fn folder_cache_key(path: &str, follow_symlinks: bool) -> String {
+    format!("{}:{}", if follow_symlinks { "follow" } else { "nofollow" }, path)
+}
+
+fn store_folder_cache(
+    state: &mut FolderBrowserControllerRust,
+    key: String,
+    rows: Vec<FileRow>,
+) {
+    if rows.is_empty() {
+        return;
+    }
+    state.folder_cache.insert(key.clone(), rows);
+    state.folder_cache_order.retain(|existing| existing != &key);
+    state.folder_cache_order.push_back(key);
+    while state.folder_cache_order.len() > MAX_FOLDER_CACHE_ENTRIES {
+        if let Some(oldest) = state.folder_cache_order.pop_front() {
+            state.folder_cache.remove(&oldest);
+        }
+    }
 }
 
 
@@ -549,6 +623,10 @@ fn preview_video_still_path(path: &std::path::Path) -> Option<PathBuf> {
 
 
 impl qobject::FolderBrowserController {
+    pub fn log_performance_event(&self, event: &QString, details: &QString) {
+        log_event(&event.to_string(), &details.to_string());
+    }
+
     pub fn increment_click_count(mut self: Pin<&mut Self>) {
         let previous = *self.click_count();
         let next = previous + 1;
@@ -831,14 +909,255 @@ impl qobject::FolderBrowserController {
 
 
 
+
+
+    pub fn full_refresh_database_subtree(mut self: Pin<&mut Self>, path: &QString) {
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        let generation = self.rust().scan_generation.wrapping_add(1);
+        self.as_mut().rust_mut().scan_generation = generation;
+        let qt_thread = self.qt_thread();
+
+        self.as_mut().set_status_text(QString::from(format!(
+            "Recursively refreshing database subtree: {local_path}..."
+        )));
+
+        std::thread::spawn(move || {
+            let scanner_binary = std::env::var_os("EVERYTHING_RUST_BIN")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|home| {
+                        PathBuf::from(home)
+                            .join("Projects/everything-rust/target/release/everything-rust")
+                    })
+                })
+                .unwrap_or_else(|| PathBuf::from("everything-rust"));
+
+            let command_result = std::process::Command::new(&scanner_binary)
+                .arg("index")
+                .arg("--root")
+                .arg(&local_path)
+                .arg("--prune-missing")
+                .arg("--threads")
+                .arg("2")
+                .arg("--batch-size")
+                .arg("10000")
+                .output();
+
+            let refresh_error = match command_result {
+                Ok(output) if output.status.success() => None,
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    Some(if !stderr.is_empty() {
+                        stderr
+                    } else if !stdout.is_empty() {
+                        stdout
+                    } else {
+                        format!("recursive index exited with {}", output.status)
+                    })
+                }
+                Err(error) => Some(format!(
+                    "Could not run {}: {error}",
+                    scanner_binary.display()
+                )),
+            };
+
+            let rows_result = if refresh_error.is_none() {
+                scan_database_directory(&local_path)
+            } else {
+                Err(refresh_error.clone().unwrap_or_else(|| "Unknown full refresh error".to_string()))
+            };
+
+            let _ = qt_thread.queue(move |mut controller| {
+                if controller.rust().scan_generation != generation {
+                    return;
+                }
+
+                match rows_result {
+                    Ok(rows) => {
+                        let row_count = rows.len().min(i32::MAX as usize) as i32;
+                        controller.as_mut().rust_mut().rows = rows;
+                        controller.as_mut().set_current_path(QString::from(local_path.clone()));
+                        controller.as_mut().set_row_count(row_count);
+                        controller.as_mut().set_is_scanning(false);
+                        controller.as_mut().set_size_scan_done(0);
+                        controller.as_mut().set_size_scan_total(0);
+                        bump_update_generation(controller.as_mut());
+                        controller.as_mut().set_status_text(QString::from(format!(
+                            "Database subtree fully refreshed: {local_path} ({row_count} direct items)"
+                        )));
+                    }
+                    Err(error) => {
+                        controller.as_mut().set_status_text(QString::from(format!(
+                            "Database full refresh failed: {local_path}: {error}"
+                        )));
+                    }
+                }
+            });
+        });
+    }
+
+    pub fn refresh_database_folder(mut self: Pin<&mut Self>, path: &QString) {
+        let raw_path = path.to_string();
+        let local_path = normalize_local_path(&raw_path);
+        let generation = self.rust().scan_generation.wrapping_add(1);
+        self.as_mut().rust_mut().scan_generation = generation;
+        let qt_thread = self.qt_thread();
+
+        self.as_mut().set_status_text(QString::from(format!(
+            "Refreshing database folder: {local_path}..."
+        )));
+
+        std::thread::spawn(move || {
+            let scanner_binary = std::env::var_os("EVERYTHING_RUST_BIN")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|home| {
+                        PathBuf::from(home)
+                            .join("Projects/everything-rust/target/release/everything-rust")
+                    })
+                })
+                .unwrap_or_else(|| PathBuf::from("everything-rust"));
+
+            let command_result = std::process::Command::new(&scanner_binary)
+                .arg("refresh-folder")
+                .arg("--path")
+                .arg(&local_path)
+                .output();
+
+            let refresh_error = match command_result {
+                Ok(output) if output.status.success() => None,
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    Some(if !stderr.is_empty() {
+                        stderr
+                    } else if !stdout.is_empty() {
+                        stdout
+                    } else {
+                        format!("refresh-folder exited with {}", output.status)
+                    })
+                }
+                Err(error) => Some(format!(
+                    "Could not run {}: {error}",
+                    scanner_binary.display()
+                )),
+            };
+
+            let rows_result = if refresh_error.is_none() {
+                scan_database_directory(&local_path)
+            } else {
+                Err(refresh_error.clone().unwrap_or_else(|| "Unknown refresh error".to_string()))
+            };
+
+            let _ = qt_thread.queue(move |mut controller| {
+                if controller.rust().scan_generation != generation {
+                    return;
+                }
+
+                match rows_result {
+                    Ok(rows) => {
+                        let row_count = rows.len().min(i32::MAX as usize) as i32;
+                        controller.as_mut().rust_mut().rows = rows;
+                        controller.as_mut().set_current_path(QString::from(local_path.clone()));
+                        controller.as_mut().set_row_count(row_count);
+                        controller.as_mut().set_is_scanning(false);
+                        controller.as_mut().set_size_scan_done(0);
+                        controller.as_mut().set_size_scan_total(0);
+                        bump_update_generation(controller.as_mut());
+                        controller.as_mut().set_status_text(QString::from(format!(
+                            "Database folder refreshed: {local_path} ({row_count} items)"
+                        )));
+                    }
+                    Err(error) => {
+                        controller.as_mut().set_status_text(QString::from(format!(
+                            "Database folder refresh failed: {local_path}: {error}"
+                        )));
+                    }
+                }
+            });
+        });
+    }
+
+    pub fn family_descriptor_for_path(&self, path: &QString) -> QString {
+        family_descriptor_for_path(&normalize_local_path(&path.to_string()))
+            .map(QString::from)
+            .unwrap_or_default()
+    }
+
+    pub fn set_family_descriptor(
+        mut self: Pin<&mut Self>,
+        path: &QString,
+        descriptor: &QString,
+    ) -> bool {
+        let path = normalize_local_path(&path.to_string());
+        match set_family_descriptor_for_path(&path, &descriptor.to_string()) {
+            Ok(stored) => {
+                if let Some(row) = self.as_mut().rust_mut().rows.iter_mut()
+                    .find(|row| row.path.to_string_lossy() == path)
+                {
+                    row.family_descriptor = stored.clone();
+                    bump_update_generation(self.as_mut());
+                }
+                self.as_mut().set_status_text(QString::from(format!(
+                    "Family descriptor saved: {stored} -> {path}"
+                )));
+                true
+            }
+            Err(error) => {
+                self.as_mut().set_status_text(QString::from(error));
+                false
+            }
+        }
+    }
+
+    pub fn remove_family_descriptor(mut self: Pin<&mut Self>, path: &QString) -> bool {
+        let path = normalize_local_path(&path.to_string());
+        match remove_family_descriptor_for_path(&path) {
+            Ok(removed) => {
+                if let Some(row) = self.as_mut().rust_mut().rows.iter_mut()
+                    .find(|row| row.path.to_string_lossy() == path)
+                {
+                    row.family_descriptor.clear();
+                    bump_update_generation(self.as_mut());
+                }
+                self.as_mut().set_status_text(QString::from(if removed {
+                    format!("Family descriptor removed: {path}")
+                } else {
+                    format!("No family descriptor was set: {path}")
+                }));
+                true
+            }
+            Err(error) => {
+                self.as_mut().set_status_text(QString::from(error));
+                false
+            }
+        }
+    }
+
+    pub fn list_family_descriptors_json(&self) -> QString {
+        list_family_descriptors_json()
+            .map(QString::from)
+            .unwrap_or_else(|error| QString::from(format!("{{\"error\":\"{}\"}}", error.replace('"', "'"))))
+    }
+
     pub fn scan_database_path(mut self: Pin<&mut Self>, path: &QString) {
         let raw_path = path.to_string();
         let local_path = normalize_local_path(&raw_path);
 
+
+        // Database scans replace the visible row set. Invalidate any background
+        // filesystem-mode workers that might still be queued and apply updates by
+        // row index, such as directory-size, MIME, or media metadata workers.
+        let next_generation = self.rust().scan_generation.wrapping_add(1);
+        self.as_mut().rust_mut().scan_generation = next_generation;
         self.as_mut().set_current_path(QString::from(local_path.clone()));
         self.as_mut().set_is_scanning(false);
         self.as_mut().set_size_scan_done(0);
         self.as_mut().set_size_scan_total(0);
+        self.as_mut().set_analysis_scan_done(0);
+        self.as_mut().set_analysis_scan_total(0);
 
         match scan_database_directory(&local_path) {
             Ok(rows) => {
@@ -862,11 +1181,28 @@ impl qobject::FolderBrowserController {
     }
 
             pub fn scan_path(mut self: Pin<&mut Self>, path: &QString) {
+        let scan_request_started = Instant::now();
         let qt_thread = self.qt_thread();
         let raw_path = path.to_string();
         let local_path = normalize_local_path(&raw_path);
         let directory = Path::new(&local_path);
         let follow_symlinks = *self.follow_symlinks();
+        let previous_path = self.current_path().to_string();
+
+        // Preserve the fully enriched rows of the folder we are leaving. This includes
+        // MIME/media results and completed directory sizes gathered during the session.
+        if !previous_path.is_empty() && !self.rust().rows.is_empty() {
+            let previous_key = folder_cache_key(&previous_path, follow_symlinks);
+            let previous_rows = self.rust().rows.clone();
+            store_folder_cache(self.as_mut().rust_mut().get_mut(), previous_key, previous_rows);
+        }
+
+        let cache_key = folder_cache_key(&local_path, follow_symlinks);
+        let cached_rows = self.rust().folder_cache.get(&cache_key).cloned();
+        log_event(
+            "scan.request",
+            &format!("path={} cache={} generation_next={}", local_path, if cached_rows.is_some() { "hit" } else { "miss" }, self.rust().scan_generation.wrapping_add(1)),
+        );
 
         self.as_mut().set_current_path(QString::from(local_path.clone()));
         let next_generation = self.rust().scan_generation.wrapping_add(1);
@@ -879,6 +1215,8 @@ impl qobject::FolderBrowserController {
             self.as_mut().set_is_scanning(false);
             self.as_mut().set_size_scan_done(0);
             self.as_mut().set_size_scan_total(0);
+        self.as_mut().set_analysis_scan_done(0);
+        self.as_mut().set_analysis_scan_total(0);
             bump_update_generation(self.as_mut());
             self.as_mut().set_status_text(QString::from(format!("Path does not exist: {local_path}")));
             return;
@@ -890,34 +1228,80 @@ impl qobject::FolderBrowserController {
             self.as_mut().set_is_scanning(false);
             self.as_mut().set_size_scan_done(0);
             self.as_mut().set_size_scan_total(0);
+        self.as_mut().set_analysis_scan_done(0);
+        self.as_mut().set_analysis_scan_total(0);
             bump_update_generation(self.as_mut());
             self.as_mut().set_status_text(QString::from(format!("Not a directory: {local_path}")));
             return;
         }
 
-        let previous_directory_sizes: std::collections::HashMap<PathBuf, (Option<u64>, String)> = self
-            .rust()
-            .rows
-            .iter()
-            .filter(|row| row.is_dir)
-            .map(|row| (row.path.clone(), (row.size_bytes, row.size_text.clone())))
-            .collect();
+        let previous_directory_sizes: std::collections::HashMap<PathBuf, (Option<u64>, String)> = cached_rows
+            .as_ref()
+            .map(|rows| {
+                rows.iter()
+                    .filter(|row| row.is_dir)
+                    .map(|row| (row.path.clone(), (row.size_bytes, row.size_text.clone())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let cached_complete_directory_sizes: std::collections::HashSet<PathBuf> = cached_rows
+            .as_ref()
+            .map(|rows| {
+                rows.iter()
+                    .filter(|row| row.is_dir && row.size_status.as_str() == "done")
+                    .map(|row| row.path.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
 
-        self.as_mut().rust_mut().rows.clear();
-        self.as_mut().set_row_count(0);
         self.as_mut().set_size_scan_done(0);
         self.as_mut().set_size_scan_total(0);
+        self.as_mut().set_analysis_scan_done(0);
+        self.as_mut().set_analysis_scan_total(0);
         self.as_mut().set_is_scanning(true);
+
+        if let Some(rows) = cached_rows {
+            let cached_count = rows.len();
+            self.as_mut().rust_mut().rows = rows;
+            self.as_mut().set_row_count(cached_count.min(i32::MAX as usize) as i32);
+            self.as_mut().set_status_text(QString::from(format!(
+                "Showing cached {cached_count} entries from {local_path}; refreshing folder…"
+            )));
+        } else {
+            self.as_mut().rust_mut().rows.clear();
+            self.as_mut().set_row_count(0);
+            self.as_mut().set_status_text(QString::from(format!(
+                "Opening {local_path}; reading directory entries…"
+            )));
+        }
         bump_update_generation(self.as_mut());
-        self.as_mut().set_status_text(QString::from(format!("Scanning {local_path}…")));
+        log_event("scan.initial_publish", &format!("path={} rows={} elapsed_ms={}", local_path, self.rust().rows.len(), scan_request_started.elapsed().as_millis()));
 
         let directory_for_scan = PathBuf::from(local_path.clone());
         let scan_qt_thread = qt_thread.clone();
         std::thread::spawn(move || {
-            let scan_result = scan_directory(&directory_for_scan, follow_symlinks);
+            let worker_started = Instant::now();
+            log_event("scan.worker_start", &format!("path={} generation={}", directory_for_scan.display(), generation));
+            let scan_result = scan_directory(&directory_for_scan, follow_symlinks).map(|mut rows| {
+                // SQLite metadata lookup must not block the Qt UI thread.
+                if let Err(error) = populate_family_descriptors(&mut rows) {
+                    eprintln!("Could not load family descriptors for {}: {error}", directory_for_scan.display());
+                }
+                rows
+            });
+            let worker_elapsed_ms = worker_started.elapsed().as_millis();
+            let worker_rows = scan_result.as_ref().map(|rows| rows.len()).unwrap_or(0);
+            log_event("scan.worker_finished", &format!("path={} rows={} elapsed_ms={}", directory_for_scan.display(), worker_rows, worker_elapsed_ms));
+            let callback_queued = Instant::now();
             let apply_qt_thread = scan_qt_thread.clone();
             let _ = scan_qt_thread.queue(move |mut controller| {
-                if controller.rust().scan_generation != generation { return; }
+                let callback_started = Instant::now();
+                let queue_wait_ms = callback_queued.elapsed().as_millis();
+                if controller.rust().scan_generation != generation {
+                    log_event("scan.qt_apply_stale", &format!("generation={} queue_wait_ms={}", generation, queue_wait_ms));
+                    return;
+                }
+                log_event("scan.qt_apply_start", &format!("generation={} queue_wait_ms={}", generation, queue_wait_ms));
 
                 let rows = match scan_result {
                     Ok(rows) => rows,
@@ -935,10 +1319,25 @@ impl qobject::FolderBrowserController {
                     }
                 };
 
+                let mut rows = rows;
+                for row in rows.iter_mut().filter(|row| row.is_dir) {
+                    if let Some((bytes, text)) = previous_directory_sizes.get(&row.path) {
+                        row.size_bytes = *bytes;
+                        row.size_text = text.clone();
+                        row.size_status = if cached_complete_directory_sizes.contains(&row.path) {
+                            SizeStatus::Done
+                        } else {
+                            SizeStatus::Stale
+                        };
+                    }
+                }
+
+                // Re-entering a cached folder must not recursively calculate every
+                // completed folder size again.
                 let directory_jobs: Vec<(usize, PathBuf)> = rows
                     .iter()
                     .enumerate()
-                    .filter(|(_, row)| row.is_dir)
+                    .filter(|(_, row)| row.is_dir && !cached_complete_directory_sizes.contains(&row.path))
                     .map(|(index, row)| (index, row.path.clone()))
                     .collect();
 
@@ -949,28 +1348,24 @@ impl qobject::FolderBrowserController {
                     .map(|(index, row)| (index, row.path.clone()))
                     .collect();
 
-                let mut rows = rows;
                 for (row_index, _) in &directory_jobs {
                     if let Some(row) = rows.get_mut(*row_index) {
-                        if let Some((previous_size_bytes, previous_size_text)) = previous_directory_sizes.get(&row.path) {
-                            row.size_bytes = *previous_size_bytes;
-                            row.size_text = previous_size_text.clone();
-                            row.size_status = SizeStatus::Stale;
-                        } else {
-                            row.size_bytes = None;
-                            row.size_text.clear();
-                            row.size_status = SizeStatus::Scanning;
-                        }
+                        if row.size_bytes.is_none() { row.size_text.clear(); }
+                        row.size_status = SizeStatus::Scanning;
                     }
                 }
 
                 let count = rows.len();
                 let size_scan_total = directory_jobs.len().min(i32::MAX as usize) as i32;
                 let analysis_total = analysis_jobs.len();
+                store_folder_cache(controller.as_mut().rust_mut().get_mut(), cache_key.clone(), rows.clone());
                 controller.as_mut().rust_mut().rows = rows;
                 controller.as_mut().set_row_count(count.min(i32::MAX as usize) as i32);
                 controller.as_mut().set_size_scan_done(0);
                 controller.as_mut().set_size_scan_total(size_scan_total);
+                controller.as_mut().rust_mut().analysis_scan_done_internal = 0;
+                controller.as_mut().set_analysis_scan_done(0);
+                controller.as_mut().set_analysis_scan_total(analysis_total.min(i32::MAX as usize) as i32);
                 controller.as_mut().set_is_scanning(size_scan_total > 0 || analysis_total > 0);
                 bump_update_generation(controller.as_mut());
 
@@ -1022,7 +1417,23 @@ impl qobject::FolderBrowserController {
                                         } else { false }
                                     } else { false }
                                 };
-                                if changed { bump_update_generation(controller.as_mut()); }
+                                if changed {
+                                    controller.as_mut().set_native_row_update_index(
+                                        row_index.min(i32::MAX as usize) as i32,
+                                    );
+                                    let next = (*controller.native_row_update_generation())
+                                        .wrapping_add(1);
+                                    controller.as_mut().set_native_row_update_generation(next);
+                                }
+                                let analysis_total = *controller.analysis_scan_total();
+                                let analysis_done = controller.rust()
+                                    .analysis_scan_done_internal
+                                    .saturating_add(1)
+                                    .min(analysis_total);
+                                controller.as_mut().rust_mut().analysis_scan_done_internal = analysis_done;
+                                if analysis_done == analysis_total || analysis_done % 32 == 0 {
+                                    controller.as_mut().set_analysis_scan_done(analysis_done);
+                                }
                             });
                         }
 
@@ -1038,13 +1449,18 @@ impl qobject::FolderBrowserController {
                     });
                 }
 
+                log_event("scan.qt_apply_ready", &format!("generation={} rows={} size_jobs={} analysis_jobs={} apply_ms={}", generation, count, directory_jobs.len(), analysis_total, callback_started.elapsed().as_millis()));
+
                 if !directory_jobs.is_empty() {
                     let size_qt_thread = apply_qt_thread.clone();
                     std::thread::spawn(move || {
+                        let size_worker_started = Instant::now();
+                        log_event("size.worker_start", &format!("generation={} jobs={}", generation, directory_jobs.len()));
                         let status_qt_thread = size_qt_thread.clone();
                         let mut batch = DirectorySizeBatch::new(size_qt_thread, generation);
 
                         for (row_index, dir_path) in directory_jobs {
+                            let directory_started = Instant::now();
                             let mut last_progress_update = Instant::now();
 
                             let result = calculate_directory_size(&dir_path, follow_symlinks, |partial_size| {
@@ -1058,6 +1474,11 @@ impl qobject::FolderBrowserController {
                                     last_progress_update = Instant::now();
                                 }
                             });
+
+                            let directory_elapsed_ms = directory_started.elapsed().as_millis();
+                            if directory_elapsed_ms >= 500 {
+                                log_event("size.directory_slow", &format!("generation={} elapsed_ms={} path={}", generation, directory_elapsed_ms, dir_path.display()));
+                            }
 
                             match result {
                                 Ok(final_size) => batch.push(
@@ -1085,9 +1506,12 @@ impl qobject::FolderBrowserController {
                         }
 
                         batch.flush();
+                        log_event("size.worker_queued_all", &format!("generation={} elapsed_ms={}", generation, size_worker_started.elapsed().as_millis()));
 
+                        let finished_queued = Instant::now();
                         let _ = status_qt_thread.queue(move |mut controller| {
                             if controller.rust().scan_generation == generation {
+                                log_event("size.finished_callback", &format!("generation={} queue_wait_ms={}", generation, finished_queued.elapsed().as_millis()));
                                 let total = *controller.size_scan_total();
                                 controller.as_mut().set_size_scan_done(total);
                                 let still_analyzing = controller.rust().rows.iter().any(|row| {

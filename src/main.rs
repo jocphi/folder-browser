@@ -13,6 +13,7 @@ mod database_browser;
 pub mod dir_size_worker;
 mod tree_count_worker;
 pub mod signals;
+pub mod performance_log;
 pub mod controller_accessors;
 pub mod cxxqt_object;
 
@@ -21,7 +22,9 @@ use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QQmlEngine, QString, QU
 use std::pin::Pin;
 
 fn main() {
+    crate::performance_log::session_start();
     let mut app = QGuiApplication::new();
+    crate::cxxqt_object::qobject::register_native_file_model();
     if let Some(mut app) = app.as_mut() {
         app.as_mut()
             .set_organization_name(&QString::from("John Ole Hasselbalch Clausen"));

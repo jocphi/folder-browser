@@ -5,6 +5,7 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtCore
 import dk.john.folderbrowser 1.0
+import dk.john.folderbrowser.native 1.0
 
 ApplicationWindow {
     id: root
@@ -13,8 +14,49 @@ ApplicationWindow {
     visible: true
     title: "folder-browser - CXX-Qt local explorer"
     color: windowBackgroundColor
+    property string familyEditTargetPath: ""
+    property bool familiesFilterEnabled: false
+
+    function selectedFamilyFolderRow() {
+        if (!selectedPaths || selectedPaths.length !== 1)
+            return null
+        let wanted = String(selectedPaths[0] || "")
+        for (let index = 0; index < fileModel.count; index += 1) {
+            let row = fileModel.get(index)
+            if (String(row.path || "") === wanted && Boolean(row.isDir) && !root.isParentEntry(row))
+                return row
+        }
+        return null
+    }
+
+    function beginSelectedFamilyEdit() {
+        let row = selectedFamilyFolderRow()
+        if (!row) {
+            root.setStatusMessage("Select exactly one folder to edit its family descriptor")
+            return
+        }
+        familyEditTargetPath = String(row.path || "")
+    }
+
+    function commitFamilyDescriptor(rowIndex, pathText, descriptorText) {
+        pathText = String(pathText || "")
+        descriptorText = String(descriptorText || "")
+        let ok = descriptorText.trim().length === 0
+                 ? controller.removeFamilyDescriptor(pathText)
+                 : controller.setFamilyDescriptor(pathText, descriptorText)
+        if (ok) {
+            familyEditTargetPath = ""
+            root.refreshDisplayedRows()
+            Qt.callLater(fileListView.forceListFocus)
+        }
+    }
+
 
     property var allRows: []
+    property var pendingModelRows: []
+    property int pendingModelRowIndex: 0
+    property bool progressiveModelBuildActive: false
+    property int progressiveModelChunkSize: 64
 
     property bool previewFilesEnabled: false
     property real previewPaneWidth: 320
@@ -56,6 +98,7 @@ ApplicationWindow {
         "Default": [
             ({ key: "live", label: "Live", width: 48, fillWidth: false, menuKey: "live" }),
             ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
+            ({ key: "familyDescriptor", label: "Family descriptor", width: 190, fillWidth: false, menuKey: "familyDescriptor" }),
             ({ key: "kind", label: "Type", width: 90, fillWidth: false, menuKey: "kind" }),
             ({ key: "size", label: "Size", width: 100, fillWidth: false, menuKey: "size" }),
             ({ key: "modified", label: "Modified", width: 210, fillWidth: false, menuKey: "modified" })
@@ -63,6 +106,7 @@ ApplicationWindow {
         "Media": [
             ({ key: "live", label: "Live", width: 48, fillWidth: false, menuKey: "live" }),
             ({ key: "name", label: "Name", width: -1, fillWidth: true, menuKey: "name" }),
+            ({ key: "familyDescriptor", label: "Family descriptor", width: 190, fillWidth: false, menuKey: "familyDescriptor" }),
             ({ key: "kind", label: "Type", width: 120, fillWidth: false, menuKey: "kind" }),
             ({ key: "size", label: "Size", width: 110, fillWidth: false, menuKey: "size" }),
             ({ key: "modified", label: "Modified", width: 170, fillWidth: false, menuKey: "modified" }),
@@ -80,8 +124,8 @@ ApplicationWindow {
     property bool followSymlinks: false
     property string filterText: ""
     property string savedStartupPath: ""
-    property int sizeScanTotal: countSizeScanTotal(allRows, controller.updateGeneration)
-    property int sizeScanDone: countSizeScanDone(allRows, controller.updateGeneration)
+    property int sizeScanTotal: controller.sizeScanTotal
+    property int sizeScanDone: controller.sizeScanDone
     property bool isScanningSizes: sizeScanTotal > 0 && sizeScanDone < sizeScanTotal
 
     property int rowHeight: 32
@@ -275,7 +319,7 @@ ApplicationWindow {
         if (!row) {
             return false;
         }
-        return String(row.name || "").toLowerCase().indexOf(query) >= 0 || String(row.kind || "").toLowerCase().indexOf(query) >= 0 || String(row.path || "").toLowerCase().indexOf(query) >= 0;
+        return String(row.name || "").toLowerCase().indexOf(query) >= 0 || String(row.familyDescriptor || "").toLowerCase().indexOf(query) >= 0 || String(row.kind || "").toLowerCase().indexOf(query) >= 0 || String(row.path || "").toLowerCase().indexOf(query) >= 0;
     }
 
     function fileExtension(fileName) {
@@ -368,9 +412,14 @@ ApplicationWindow {
                 return true;
             if (!showHidden && row.name.startsWith('.'))
                 return false;
+            if (familiesFilterEnabled
+                    && (!Boolean(row.isDir)
+                        || String(row.familyDescriptor || '').length === 0))
+                return false;
             if (query.length === 0)
                 return true;
             return row.name.toLowerCase().indexOf(query) !== -1
+                   || String(row.familyDescriptor || '').toLowerCase().indexOf(query) !== -1
                    || row.kind.toLowerCase().indexOf(query) !== -1
                    || String(row.mimeType || '').toLowerCase().indexOf(query) !== -1
                    || row.path.toLowerCase().indexOf(query) !== -1;
@@ -441,6 +490,8 @@ ApplicationWindow {
                     return result;
             } else if (column === "live") {
                 result = compareText(left.liveStatus, right.liveStatus);
+            } else if (column === "familyDescriptor") {
+                result = compareText(left.familyDescriptor, right.familyDescriptor);
             } else if (column === "kind") {
                 result = compareText(displayType(left), displayType(right));
             } else if (column === "size") {
@@ -731,6 +782,11 @@ ApplicationWindow {
     }
 
     function requestTrashSelected() {
+        if (root.browserSource === "Database") {
+            root.setStatusMessage("Trash is disabled in Database mode for now")
+            return
+        }
+
         let paths = trashCandidatePaths()
         if (paths.length === 0)
             return
@@ -794,7 +850,7 @@ ApplicationWindow {
         let parent = parentPath(current)
         if (!parent || parent === current) return null
         return {
-            name: "..", kind: "folder", mimeType: "inode/directory", mimeStatus: "done",
+            name: "..", familyDescriptor: "", kind: "folder", mimeType: "inode/directory", mimeStatus: "done",
             sizeBytes: -1, sizeStatus: "unknown", modifiedSecs: -1,
             durationSecs: -1, codec: "", videoCodec: "", audioCodec: "",
             bitrate: -1, fps: -1, mediaWidth: -1, mediaHeight: -1,
@@ -805,6 +861,27 @@ ApplicationWindow {
     }
 
     function isParentEntry(row) { return row && row.isParentEntry === true }
+
+    function databaseRowIsLive(row) {
+        if (root.browserSource !== "Database")
+            return true
+        if (!row)
+            return false
+        if (root.isParentEntry(row))
+            return true
+        if (row.isDir)
+            return true
+        return String(row.liveStatus || "unknown") === "live"
+    }
+
+    function databaseLiveStatusMessage(row) {
+        let status = String(row && row.liveStatus !== undefined ? row.liveStatus : "unknown")
+        if (status === "offline")
+            return "File is offline or not mounted"
+        if (status === "unknown")
+            return "Live status is still pending"
+        return "File is not available"
+    }
 
     function previewCurrentRow() {
         if (!previewFilesEnabled)
@@ -821,10 +898,19 @@ ApplicationWindow {
             clearPreview("No file selected")
             return
         }
+        if (!root.databaseRowIsLive(row)) {
+            previewPendingPath = ""
+            clearPreview(root.databaseLiveStatusMessage(row))
+            return
+        }
         previewPendingPath = String(row.path || "")
         previewMode = "none"
         previewStatusText = "Working on preview..."
         previewDelayTimer.restart()
+    }
+
+    function setStatusMessage(message) {
+        controller.statusText = String(message || "")
     }
 
     function clearPreview(message) {
@@ -956,36 +1042,12 @@ ApplicationWindow {
     }
 
     function rebuildRowsFromController() {
-        let rows = [];
-        let parentEntry = parentEntryRow();
-        if (parentEntry) rows.push(parentEntry);
-        for (let row = 0; row < controller.rowCount; row += 1) {
-            rows.push({
-                name: controller.fileName(row),
-                kind: controller.fileKind(row),
-                mimeType: controller.fileMimeType(row),
-                mimeStatus: controller.fileMimeStatus(row),
-                liveStatus: controller.fileLiveStatus(row),
-                sizeBytes: controller.fileSizeBytes(row),
-                sizeStatus: controller.fileSizeStatus(row),
-                modifiedSecs: controller.fileModifiedSecs(row),
-                durationSecs: controller.fileDurationSecs(row),
-                codec: controller.fileCodec(row),
-                videoCodec: controller.fileVideoCodec(row),
-                audioCodec: controller.fileAudioCodec(row),
-                bitrate: controller.fileBitrate(row),
-                fps: controller.fileFps(row),
-                mediaWidth: controller.fileMediaWidth(row),
-                mediaHeight: controller.fileMediaHeight(row),
-                mediaStatus: controller.fileMediaStatus(row),
-                path: controller.filePath(row),
-                isDir: controller.fileIsDir(row),
-                isParentEntry: false
-            });
-        }
-        allRows = rows;
-        refreshDisplayedRows();
-        applyPendingFocusAfterRefresh();
+        let started = Date.now()
+        fileModel.reload()
+        controller.logPerformanceEvent("native_model.reload_finished",
+                                       "rows=" + String(fileModel.count)
+                                       + " elapsed_ms=" + String(Date.now() - started))
+        applyPendingFocusAfterRefresh()
     }
 
     function restoreCurrentIndexAfterModelRefresh(preservedPath, fallbackIndex) {
@@ -1002,60 +1064,96 @@ ApplicationWindow {
 
 
 
-    function refreshDisplayedRows() {
-        let rows = sortRows(filterRows(allRows))
-        let sameShape = fileModel.count === rows.length
+    function modelValueOrDefault(row, roleName) {
+        let value = row[roleName]
+        if (value !== undefined) return value
+        if (roleName === "familyDescriptor" || roleName === "mimeType" || roleName === "codec"
+                || roleName === "videoCodec" || roleName === "audioCodec") return ""
+        if (roleName === "mimeStatus") return "done"
+        if (roleName === "mediaStatus") return "none"
+        if (roleName === "durationSecs" || roleName === "bitrate" || roleName === "fps"
+                || roleName === "mediaWidth" || roleName === "mediaHeight") return -1
+        return value
+    }
 
-        if (sameShape) {
-            for (let index = 0; index < rows.length; index += 1) {
-                if (String(fileModel.get(index).path || "") !== String(rows[index].path || "")) {
-                    sameShape = false
-                    break
+    function updateExistingModelRows(rows) {
+        let roles = ["name", "familyDescriptor", "kind", "mimeType", "mimeStatus", "liveStatus",
+                     "sizeBytes", "sizeStatus", "modifiedSecs", "durationSecs", "codec", "videoCodec",
+                     "audioCodec", "bitrate", "fps", "mediaWidth", "mediaHeight", "mediaStatus", "path", "isDir"]
+        let changed = 0
+        fileListView.beginBulkModelUpdate()
+        for (let index = 0; index < rows.length; index += 1) {
+            let current = fileModel.get(index)
+            let row = rows[index]
+            for (let r = 0; r < roles.length; r += 1) {
+                let role = roles[r]
+                let wanted = modelValueOrDefault(row, role)
+                if (current[role] !== wanted) {
+                    fileModel.setProperty(index, role, wanted)
+                    changed += 1
                 }
             }
         }
+        fileListView.endBulkModelUpdate()
+        return changed
+    }
 
-        if (sameShape) {
-            for (let index = 0; index < rows.length; index += 1) {
-                let row = rows[index]
-                fileModel.setProperty(index, "name", row.name)
-                fileModel.setProperty(index, "kind", row.kind)
-                fileModel.setProperty(index, "mimeType", row.mimeType !== undefined ? row.mimeType : "")
-                fileModel.setProperty(index, "mimeStatus", row.mimeStatus !== undefined ? row.mimeStatus : "done")
-                fileModel.setProperty(index, "sizeBytes", row.sizeBytes)
-                fileModel.setProperty(index, "sizeStatus", row.sizeStatus)
-                fileModel.setProperty(index, "modifiedSecs", row.modifiedSecs)
-                fileModel.setProperty(index, "durationSecs", row.durationSecs !== undefined ? row.durationSecs : -1)
-                fileModel.setProperty(index, "codec", row.codec !== undefined ? row.codec : "")
-                fileModel.setProperty(index, "videoCodec", row.videoCodec !== undefined ? row.videoCodec : "")
-                fileModel.setProperty(index, "audioCodec", row.audioCodec !== undefined ? row.audioCodec : "")
-                fileModel.setProperty(index, "bitrate", row.bitrate !== undefined ? row.bitrate : -1)
-                fileModel.setProperty(index, "fps", row.fps !== undefined ? row.fps : -1)
-                fileModel.setProperty(index, "mediaWidth", row.mediaWidth !== undefined ? row.mediaWidth : -1)
-                fileModel.setProperty(index, "mediaHeight", row.mediaHeight !== undefined ? row.mediaHeight : -1)
-                fileModel.setProperty(index, "mediaStatus", row.mediaStatus !== undefined ? row.mediaStatus : "none")
-                fileModel.setProperty(index, "path", row.path)
-                fileModel.setProperty(index, "isDir", row.isDir)
-            }
+    function beginProgressiveModelBuild(rows) {
+        pendingModelRows = rows
+        pendingModelRowIndex = 0
+        progressiveModelBuildActive = true
+        progressiveModelTimer.stop()
+        fileListView.pendingIndexAfterBulkBuild = fileListView.currentIndex
+        fileListView.beginBulkModelUpdate()
+        fileModel.clear()
+        controller.statusText = "Displaying folder entries: 0 / " + String(rows.length)
+        controller.logPerformanceEvent("qml.progressive_build_start", "rows=" + String(rows.length))
+        progressiveModelTimer.start()
+    }
+    function appendProgressiveModelChunk() {
+        if (!progressiveModelBuildActive) return
+        let started = Date.now()
+        let end = Math.min(pendingModelRows.length, pendingModelRowIndex + progressiveModelChunkSize)
+        while (pendingModelRowIndex < end) {
+            fileModel.append(pendingModelRows[pendingModelRowIndex])
+            pendingModelRowIndex += 1
+        }
+        controller.statusText = "Displaying folder entries: " + String(pendingModelRowIndex) + " / " + String(pendingModelRows.length)
+        controller.logPerformanceEvent("qml.progressive_chunk_finished", "published=" + String(pendingModelRowIndex)
+                                       + " total=" + String(pendingModelRows.length)
+                                       + " elapsed_ms=" + String(Date.now() - started))
+        if (pendingModelRowIndex < pendingModelRows.length) {
+            progressiveModelTimer.start()
             return
         }
-
-        let preservedIndex = fileListView.currentIndex
-        fileModel.clear()
-        for (let index = 0; index < rows.length; index += 1) {
-            fileModel.append(rows[index])
+        progressiveModelBuildActive = false
+        pendingModelRows = []
+        pendingModelRowIndex = 0
+        fileListView.endBulkModelUpdate()
+        applyPendingFocusAfterRefresh()
+        controller.statusText = "Displayed " + String(fileModel.count) + " entries; background analysis continues"
+        controller.logPerformanceEvent("qml.progressive_build_finished", "rows=" + String(fileModel.count))
+        if (rowsRebuildTimer.pendingAfterProgressiveBuild) {
+            rowsRebuildTimer.pendingAfterProgressiveBuild = false
+            rowsRebuildTimer.restart()
         }
+    }
 
-        if (fileModel.count > 0) {
-            fileListView.currentIndex = Math.max(0, Math.min(preservedIndex, fileModel.count - 1))
-        } else {
-            fileListView.currentIndex = -1
-        }
-    
-        fileListView.resetAfterRowsRebuilt()
-}
-
-
+    function refreshDisplayedRows() {
+        let started = Date.now()
+        fileModel.showHidden = root.showHidden
+        fileModel.familiesOnly = root.familiesFilterEnabled
+        fileModel.filterText = root.filterText
+        fileModel.sortColumn = root.sortColumn
+        fileModel.sortAscending = root.sortAscending
+        fileModel.foldersFirst = root.foldersFirst
+        fileModel.foldersAlwaysAZ = root.foldersAlwaysAZ
+        fileModel.reload()
+        controller.logPerformanceEvent("native_model.refresh_finished",
+                                       "rows=" + String(fileModel.count)
+                                       + " elapsed_ms=" + String(Date.now() - started))
+        applyPendingFocusAfterRefresh()
+    }
 
     function setCurrentIndexWithOptionalRange(newIndex, extendSelection) {
         if (fileModel.count <= 0) {
@@ -1118,6 +1216,12 @@ ApplicationWindow {
     }
 
     function openRow(row) {
+        if (row && !row.isDir && !root.databaseRowIsLive(row)) {
+            root.setStatusMessage(root.databaseLiveStatusMessage(row))
+            root.clearPreview(root.databaseLiveStatusMessage(row))
+            return
+        }
+
         if (!row)
             return;
         if (row.isDir)
@@ -1364,33 +1468,18 @@ ApplicationWindow {
     }
 
     function statusPropertyScanDone() {
-        let keys = root.statusPropertyScanColumnKeys()
-        if (keys.length <= 0)
+        let totalFiles = root.statusPropertyScanTotal()
+        if (totalFiles <= 0)
             return 0
-        let doneCells = 0
-        let totalFiles = 0
-        for (let rowIndex = 0; rowIndex < fileModel.count; rowIndex += 1) {
-            let row = fileModel.get(rowIndex)
-            if (!row || root.statusIsParentRow(row))
-                continue
-            totalFiles += 1
-            for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
-                let key = keys[keyIndex]
-                let status = ""
-                if (key === "size")
-                    status = String(row.sizeStatus || "")
-                else if (key === "kind" || key === "mimeType")
-                    status = String(row.mimeStatus || "")
-                else
-                    status = String(row.mediaStatus || "")
-                if (status !== "scanning")
-                    doneCells += 1
-            }
-        }
-        let doneFiles = Math.floor(doneCells / Math.max(1, keys.length))
-        if (totalFiles > 0 && doneFiles <= 0)
-            return 1
-        return Math.min(doneFiles, totalFiles)
+
+        // Rust owns the authoritative analysis counters. Reading QML model rows
+        // here was both O(rows) per notification and unreliable because dataChanged
+        // inside get() loops is not a stable binding dependency.
+        let analysisTotal = Math.max(0, Number(controller.analysisScanTotal || 0))
+        let analysisDone = Math.max(0, Math.min(analysisTotal,
+                                                Number(controller.analysisScanDone || 0)))
+        let rowsNotAnalyzed = Math.max(0, totalFiles - analysisTotal)
+        return Math.min(totalFiles, rowsNotAnalyzed + analysisDone)
     }
 
     function previewTitleText() {
@@ -1493,7 +1582,10 @@ ApplicationWindow {
     }
 
     function statusAnalysisText() {
-        return controller.isScanning ? "File analysis running" : "File analysis finished"
+        let message = String(controller.statusText || "")
+        if (message.length > 0)
+            return message
+        return controller.isScanning ? "Working…" : "Ready"
     }
 
 
@@ -1538,6 +1630,29 @@ ApplicationWindow {
 
         if (targetPath.length > 0)
             root.scanPath(targetPath)
+    }
+
+
+
+    function fullRefreshCurrentDatabaseSubtree() {
+        let current = String(controller.currentPath || "")
+        if (current.length <= 0)
+            return
+        if (root.browserSource !== "Database") {
+            root.scanPath(current)
+            return
+        }
+        controller.fullRefreshDatabaseSubtree(current)
+    }
+
+    function refreshCurrentSource() {
+        let current = String(controller.currentPath || "")
+        if (current.length <= 0)
+            return
+        if (root.browserSource === "Database")
+            controller.refreshDatabaseFolder(current)
+        else
+            root.scanPath(current)
     }
 
     function scanControllerPath(pathText) {
@@ -2042,6 +2157,16 @@ ApplicationWindow {
 
     }
 
+
+    function refreshCurrentSourcePath() {
+        let pathText = String(controller.currentPath || "")
+        if (pathText.length <= 0)
+            return
+        root.scanPath(pathText)
+        if (fileListView)
+            fileListView.forceListFocus()
+    }
+
     FolderBrowserController {
         id: controller
         currentPath: root.localPathFromUrl(StandardPaths.writableLocation(StandardPaths.HomeLocation))
@@ -2049,16 +2174,73 @@ ApplicationWindow {
         rowCount: 0
         updateGeneration: 0
         onUpdateGenerationChanged: {
-            rebuildRowsFromController()
-            root.rebuildTreeModelIfNeeded(false)
-            root.startLiveCheckIfNeeded(false)
-            root.startVisibleLiveStatusCheck(true)
+            // Publish the first real listing immediately. After that, Rust workers
+            // may bump updateGeneration thousands of times. Never reload all 5,510
+            // native rows for every size or analysis result. Coalesce those bursts
+            // with rowsRebuildTimer and perform one refresh after the burst is quiet.
+            if (fileModel.count <= 1 && controller.rowCount > 0) {
+                rowsRebuildTimer.stop()
+                rebuildRowsFromController()
+                root.rebuildTreeModelIfNeeded(false)
+                root.startLiveCheckIfNeeded(false)
+                root.startVisibleLiveStatusCheck(true)
+            } else {
+                rowsRebuildTimer.restart()
+            }
         }
     }
 
-    ListModel {
+    NativeFileModel {
         id: fileModel
+        controller: controller
+        showHidden: root.showHidden
+        familiesOnly: root.familiesFilterEnabled
+        filterText: root.filterText
+        sortColumn: root.sortColumn
+        sortAscending: root.sortAscending
+        foldersFirst: root.foldersFirst
+        foldersAlwaysAZ: root.foldersAlwaysAZ
     }
+
+
+    property var nativeRowUpdateQueue: []
+    property var nativeRowUpdateQueued: ({})
+
+    function enqueueNativeRowUpdate(sourceRow) {
+        sourceRow = Number(sourceRow)
+        if (!Number.isFinite(sourceRow) || sourceRow < 0)
+            return
+        let key = String(sourceRow)
+        if (nativeRowUpdateQueued[key])
+            return
+        nativeRowUpdateQueued[key] = true
+        nativeRowUpdateQueue.push(sourceRow)
+        if (!nativeRowUpdateBatchTimer.running)
+            nativeRowUpdateBatchTimer.start()
+    }
+
+    Timer {
+        id: nativeRowUpdateBatchTimer
+        interval: 50
+        repeat: false
+        onTriggered: {
+            let batch = nativeRowUpdateQueue.splice(0, 32)
+            for (let index = 0; index < batch.length; index += 1)
+                delete nativeRowUpdateQueued[String(batch[index])]
+            if (batch.length > 0)
+                fileModel.refreshSourceRows(batch)
+            if (nativeRowUpdateQueue.length > 0)
+                nativeRowUpdateBatchTimer.start()
+        }
+    }
+
+    Connections {
+        target: controller
+        function onNativeRowUpdateGenerationChanged() {
+            root.enqueueNativeRowUpdate(controller.nativeRowUpdateIndex)
+        }
+    }
+
 
 
     ListModel {
@@ -2164,10 +2346,30 @@ ApplicationWindow {
     }
 
     Timer {
-        id: rowsRebuildTimer
-        interval: 250
+        id: progressiveModelTimer
+        interval: 1
         repeat: false
-        onTriggered: rebuildRowsFromController()
+        onTriggered: root.appendProgressiveModelChunk()
+    }
+
+    Timer {
+        id: rowsRebuildTimer
+        property bool pendingAfterProgressiveBuild: false
+        interval: 500
+        repeat: false
+        onTriggered: {
+            if (root.progressiveModelBuildActive) {
+                pendingAfterProgressiveBuild = true
+                return
+            }
+            let timerStarted = Date.now()
+            controller.logPerformanceEvent("qml.rows_timer_start", "controller_rows=" + String(controller.rowCount))
+            rebuildRowsFromController()
+            root.rebuildTreeModelIfNeeded(false)
+            root.startLiveCheckIfNeeded(false)
+            root.startVisibleLiveStatusCheck(true)
+            controller.logPerformanceEvent("qml.rows_timer_finished", "elapsed_ms=" + String(Date.now() - timerStarted))
+        }
     }
 
     onSortColumnChanged: saveInterfaceSettings()
@@ -2245,6 +2447,55 @@ ApplicationWindow {
                     root.setBrowserSource(String(model[index] || "Filesystem"))
                 }
             }
+
+            Button {
+                id: refreshSourceButton
+                text: "⟳"
+                ToolTip.visible: hovered
+                ToolTip.text: root.browserSource === "Database"
+                              ? "Refresh current database folder"
+                              : "Refresh current filesystem folder"
+                Layout.preferredWidth: 34
+                onClicked: root.refreshCurrentSource()
+            }
+
+            Button {
+                id: databaseFullRefreshButton
+                text: "⟳⟳"
+                visible: root.browserSource === "Database"
+                enabled: visible
+                Layout.preferredWidth: 44
+                ToolTip.visible: hovered
+                ToolTip.text: "Full recursive refresh of the current database subtree"
+                onClicked: root.fullRefreshCurrentDatabaseSubtree()
+            }
+
+            Button {
+                text: "Family"
+                ToolTip.visible: hovered
+                ToolTip.text: "Edit the family descriptor for the selected folder"
+                enabled: root.selectedFamilyFolderRow() !== null
+                onClicked: root.beginSelectedFamilyEdit()
+            }
+
+            Button {
+                id: familiesFilterButton
+                text: "Families"
+                checkable: true
+                checked: root.familiesFilterEnabled
+                ToolTip.visible: hovered
+                ToolTip.text: checked
+                              ? "Show all folders and files"
+                              : "Show only folders with a family descriptor"
+                onToggled: {
+                    root.familiesFilterEnabled = checked
+                    root.familyEditTargetPath = ""
+                    root.refreshDisplayedRows()
+                    Qt.callLater(fileListView.forceListFocus)
+                }
+            }
+
+
 
             Label {
                 text: "Column profile"
@@ -2341,7 +2592,9 @@ ApplicationWindow {
             fileTextColor: root.fileTextColor
             secondaryTextColor: root.secondaryTextColor
             showHidden: root.showHidden
-            allRowsLength: root.allRows.length
+            allRowsLength: controller.rowCount
+            operationBusy: controller.isScanning
+            operationText: String(controller.statusText || "Reading folder metadata…")
             nameHeaderMenu: root.nameHeaderMenu
             typeHeaderMenu: root.typeHeaderMenu
             sizeHeaderMenu: root.sizeHeaderMenu
@@ -2354,6 +2607,9 @@ ApplicationWindow {
             displaySizeFunction: root.displaySize
             sizeColorFunction: root.sizeColor
             modifiedTextFunction: root.modifiedText
+            familyEditTargetPath: root.familyEditTargetPath
+            onFamilyDescriptorCommit: function(rowIndex, path, descriptor) { root.commitFamilyDescriptor(rowIndex, path, descriptor) }
+            onFamilyDescriptorCancel: root.familyEditTargetPath = ""
             onCurrentIndexChanged: root.previewCurrentRow()
             onListFocusGained: root.scrollTreeCurrentIntoView()
             onSortRequested: function(columnName) { root.setSort(columnName) }
@@ -2845,7 +3101,7 @@ ApplicationWindow {
 
             Label {
                 id: richStatusRight
-                text: "✓ " + root.statusAnalysisText()
+                text: (controller.isScanning ? "⟳ " : "✓ ") + root.statusAnalysisText()
                 color: root.secondaryTextColor
                 font.family: root.rowFontFamily
                 verticalAlignment: Text.AlignVCenter
@@ -2860,6 +3116,21 @@ ApplicationWindow {
 
 
 
+
+
+        Shortcut {
+            sequence: "Ctrl+F5"
+            context: Qt.ApplicationShortcut
+            enabled: root.browserSource === "Database"
+            onActivated: root.fullRefreshCurrentDatabaseSubtree()
+        }
+
+        Shortcut {
+            id: refreshSourceShortcut
+            sequence: "F5"
+            context: Qt.ApplicationShortcut
+            onActivated: root.refreshCurrentSource()
+        }
 
         Shortcut {
             id: trashConfirmYesShortcut
@@ -2884,6 +3155,7 @@ ApplicationWindow {
             enabled: trashConfirmDialog.opened
             onActivated: root.cancelTrashSelected()
         }
+
 
 
         Dialog {
